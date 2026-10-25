@@ -37,7 +37,7 @@ const router = createRouter({
     {
       path: '/kanban',
       name: 'kanban',
-      component: () => import('@/components/ComingSoon.vue'),
+      component: () => import('@/views/kanban/KanbanView.vue'),
       meta: { title: '实时协作看板' },
     },
     {

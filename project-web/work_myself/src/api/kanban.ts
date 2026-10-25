@@ -14,9 +14,10 @@ export interface KanbanCard {
 }
 
 /**
- * 全量看板快照（公开）。
- * 首屏加载与 WebSocket 断线重连恢复共用；写操作全部走 WebSocket（设计文档 §5）。
+ * 全量看板快照（公开），返回 {cards: [...]} 包装；首屏与 WS 重连恢复共用。
+ * 写操作全部走 WebSocket（设计文档 §5）。
  */
-export function getKanbanSnapshot() {
-  return request.get<KanbanCard[], KanbanCard[]>('/kanban/cards')
+export async function getKanbanSnapshot(): Promise<KanbanCard[]> {
+  const res = await request.get<{ cards: KanbanCard[] }, { cards: KanbanCard[] }>('/kanban/cards')
+  return res.cards
 }
