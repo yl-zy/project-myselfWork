@@ -1,7 +1,9 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import api_router
 
@@ -27,3 +29,15 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+
+@app.exception_handler(FastAPIHTTPException)
+def http_exception_handler(request: Request, exc: FastAPIHTTPException) -> JSONResponse:
+    """统一错误格式为 {code, message}，去掉 FastAPI 默认的 detail 包裹"""
+
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": "HTTP_ERROR", "message": str(exc.detail)},
+    )
