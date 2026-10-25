@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import api_router
+from app.ws.kanban import router as kanban_ws_router
 
 default_origins = "http://localhost:5173,http://127.0.0.1:5173"
 cors_origins = [
@@ -29,6 +30,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(kanban_ws_router)  # WebSocket 通道：/ws/kanban
 
 
 @app.exception_handler(FastAPIHTTPException)

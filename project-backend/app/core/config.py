@@ -15,3 +15,8 @@ BACKEND_CORS_ORIGINS = os.getenv(
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-only-secret-change-me")
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "12"))
+
+# 问答模块：限流额度（次/自然日）与 LLM 提供方（mock / 未来的 openai、dify）
+CHAT_RATE_LIMIT_USER = int(os.getenv("CHAT_RATE_LIMIT_USER", "100"))
+CHAT_RATE_LIMIT_GUEST = int(os.getenv("CHAT_RATE_LIMIT_GUEST", "20"))
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mock")
