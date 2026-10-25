@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { setCurrentPage } from '@/utils/perf'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -43,7 +44,7 @@ const router = createRouter({
     {
       path: '/perf',
       name: 'perf',
-      component: () => import('@/components/ComingSoon.vue'),
+      component: () => import('@/views/perf/PerfView.vue'),
       meta: { title: '性能监控平台' },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -53,6 +54,7 @@ const router = createRouter({
 router.afterEach((to) => {
   const title = to.meta.title as string | undefined
   document.title = title ? `${title} · 个人作品集` : '个人作品集'
+  setCurrentPage(to.path)
 })
 
 export default router
