@@ -119,10 +119,10 @@ def test_summary_province_net_consistency():
 def test_cleanup_expired_removes_old_keeps_recent():
     db = SessionLocal()
     try:
-        generate_batch(db, batch_time=OLD, size=5)
+        inserted = generate_batch(db, batch_time=OLD, size=5)
         generate_batch(db, batch_time=T2, size=5)
         deleted = cleanup_expired(db, retention_days=3)
-        assert deleted >= 5  # 过期批次被清
+        assert deleted >= inserted  # 过期批次被清（生成时同省对会被跳过，按实际插入数断言）
         surviving = db.scalar(
             text("SELECT COUNT(*) FROM migration_records WHERE batch_time = :t"),
             {"t": "2099-01-02 10:00:00"},

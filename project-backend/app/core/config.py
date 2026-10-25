@@ -24,3 +24,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "mock")
 # 人口流动模拟数据：生成间隔（秒）与滚动保留天数（设计草案 §6.2）
 MIGRATION_BATCH_INTERVAL_SECONDS = int(os.getenv("MIGRATION_BATCH_INTERVAL_SECONDS", "30"))
 MIGRATION_RETENTION_DAYS = int(os.getenv("MIGRATION_RETENTION_DAYS", "3"))
+
+# 性能监控：滚动保留天数与上报限流（批/分钟/IP，内存计数，§6.1）
+PERF_RETENTION_DAYS = int(os.getenv("PERF_RETENTION_DAYS", "7"))
+PERF_RATE_LIMIT_PER_MINUTE = int(os.getenv("PERF_RATE_LIMIT_PER_MINUTE", "60"))

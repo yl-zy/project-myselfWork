@@ -71,13 +71,19 @@ async def _generate_loop() -> None:
 
 
 async def _cleanup_loop() -> None:
-    """每小时扫一次过期数据（凌晨精确删除对演示无意义，每小时足够平滑）"""
+    """每小时扫一次过期数据（凌晨精确删除对演示无意义，每小时足够平滑）
+
+    同时承担 perf_events 的滚动清理——P0 只有这两类保留策略，共用一个循环即可。
+    """
+
+    from app.services.perf_clean import cleanup_expired_perf
 
     while True:
         await asyncio.sleep(3600)
         try:
             with SessionLocal() as db:
                 cleanup_expired(db)
+                cleanup_expired_perf(db)
         except Exception:
             pass
 
@@ -85,12 +91,15 @@ async def _cleanup_loop() -> None:
 def start_migration_tasks() -> list[asyncio.Task]:
     """服务启动时调用：空表立即生成一批（演示开机即有数据），顺手清一次过期"""
 
+    from app.services.perf_clean import cleanup_expired_perf
+
     try:
         with SessionLocal() as db:
             empty = db.scalar(select(func.count(MigrationRecord.id))) == 0
             if empty:
                 generate_batch(db)
             cleanup_expired(db)
+            cleanup_expired_perf(db)
     except Exception:
         pass  # 启动期数据库未就绪不阻塞服务，循环任务稍后会重试
     return [
