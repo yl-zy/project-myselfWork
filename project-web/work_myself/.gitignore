@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cesium 运行时静态资源（scripts/copy-cesium.mjs 从 node_modules 拷贝生成）
+public/cesium/

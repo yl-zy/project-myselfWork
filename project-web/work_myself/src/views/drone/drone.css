@@ -1,0 +1,383 @@
+/* 无人机三维巡检：全屏 3D + 悬浮式 HUD 面板 */
+.drone-page {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg-page);
+}
+
+.cesium-container {
+  position: absolute;
+  inset: 0;
+}
+
+.cesium-container :deep(.cesium-viewer-bottom) {
+  display: none;
+}
+
+.scene-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 15px;
+  letter-spacing: 0.2em;
+  pointer-events: none;
+}
+
+/* ---- 顶部栏 ---- */
+.top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: linear-gradient(180deg, rgba(7, 11, 22, 0.85), transparent);
+  z-index: 10;
+}
+
+.back-link {
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.2s ease;
+  flex: none;
+}
+
+.back-link:hover {
+  color: var(--accent);
+}
+
+.title-wrap {
+  text-align: center;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  background: var(--gradient-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.page-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  color: var(--text-muted);
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.state-badge {
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: 99px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  background: rgba(7, 11, 22, 0.6);
+}
+
+.state-badge.state-flying {
+  color: var(--accent);
+  border-color: rgba(34, 211, 238, 0.5);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.25);
+}
+
+.state-badge.state-paused {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.5);
+}
+
+.state-badge.state-done {
+  color: var(--accent-success);
+  border-color: rgba(52, 211, 153, 0.5);
+}
+
+/* ---- 左侧面板 ---- */
+.side-panel {
+  position: absolute;
+  top: 88px;
+  left: 24px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 10;
+}
+
+.panel {
+  position: relative;
+  padding: 18px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(34, 211, 238, 0.14);
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+}
+
+.panel::before,
+.panel::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--accent);
+  border-style: solid;
+  opacity: 0.7;
+}
+
+.panel::before {
+  top: -1px;
+  left: -1px;
+  border-width: 2px 0 0 2px;
+}
+
+.panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 2px 2px 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  margin-bottom: 14px;
+}
+
+.panel-mark {
+  width: 3px;
+  height: 13px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.8);
+}
+
+.panel-mark.violet {
+  background: var(--accent-violet);
+  box-shadow: 0 0 6px rgba(129, 140, 248, 0.8);
+}
+
+.route-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.route-item:last-child {
+  margin-bottom: 0;
+}
+
+.route-item:hover:not(.locked) {
+  border-color: var(--border-strong);
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.route-item.active {
+  border-color: rgba(34, 211, 238, 0.5);
+  background: rgba(34, 211, 238, 0.08);
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.15);
+}
+
+.route-item.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.route-name {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.route-meta {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ---- 控制按钮 ---- */
+.ctrl-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ctrl-btn {
+  flex: 1;
+  padding: 9px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: rgba(2, 6, 23, 0.4);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.ctrl-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ctrl-btn.primary {
+  background: var(--gradient-brand);
+  border: none;
+  color: #04121f;
+  font-weight: 600;
+}
+
+.ctrl-btn.primary:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow);
+  color: #04121f;
+}
+
+.ctrl-btn.danger:hover:not(:disabled) {
+  border-color: var(--accent-danger);
+  color: var(--accent-danger);
+}
+
+.ctrl-label {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+
+.speed-row {
+  display: flex;
+  gap: 8px;
+}
+
+.speed-btn {
+  flex: 1;
+  padding: 7px;
+  font-size: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.speed-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(34, 211, 238, 0.1);
+}
+
+/* ---- 底部遥测条 ---- */
+.telemetry-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  width: min(920px, calc(100% - 48px));
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 40px);
+  padding: 14px 24px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(34, 211, 238, 0.14);
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+  z-index: 10;
+}
+
+.tele-item {
+  flex: none;
+  text-align: center;
+}
+
+.tele-num {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.tele-num em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 3px;
+}
+
+.tele-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  margin-top: 2px;
+}
+
+.progress-wrap {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--gradient-brand);
+  border-radius: 3px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+  transition: width 0.2s linear;
+}
+
+.progress-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  flex: none;
+}
+
+/* ---- 小屏适配：面板收窄，遥测条换行 ---- */
+@media (max-width: 960px) {
+  .side-panel {
+    width: 240px;
+    left: 12px;
+    top: 80px;
+  }
+
+  .telemetry-bar {
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    bottom: 12px;
+  }
+
+  .progress-wrap {
+    width: 100%;
+    flex: none;
+  }
+}

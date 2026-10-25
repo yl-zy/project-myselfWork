@@ -5,6 +5,10 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  // Cesium 静态资源由 scripts/copy-cesium.mjs 拷到 public/cesium，Vite 原生服务（dev/build 一致）
+  define: {
+    CESIUM_BASE_URL: JSON.stringify('/cesium/'),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
