@@ -31,7 +31,7 @@ const router = createRouter({
     {
       path: '/chat',
       name: 'chat',
-      component: () => import('@/components/ComingSoon.vue'),
+      component: () => import('@/views/chat/ChatView.vue'),
       meta: { title: '知识库问答' },
     },
     {
