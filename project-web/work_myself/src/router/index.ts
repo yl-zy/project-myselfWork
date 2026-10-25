@@ -19,7 +19,7 @@ const router = createRouter({
     {
       path: '/migration',
       name: 'migration',
-      component: () => import('@/components/ComingSoon.vue'),
+      component: () => import('@/views/migration/MigrationView.vue'),
       meta: { title: '人口流动大屏' },
     },
     {
