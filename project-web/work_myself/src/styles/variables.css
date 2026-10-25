@@ -1,0 +1,30 @@
+:root {
+  /* ---- 深色科技风主题变量 ---- */
+  --bg-page: #070b16;
+  --bg-panel: rgba(15, 23, 42, 0.72);
+  --bg-card: rgba(148, 163, 184, 0.06);
+  --bg-card-hover: rgba(148, 163, 184, 0.12);
+  --border-subtle: rgba(148, 163, 184, 0.16);
+  --border-strong: rgba(148, 163, 184, 0.32);
+
+  --text-primary: #e6edf7;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent: #22d3ee;
+  --accent-violet: #818cf8;
+  --accent-success: #34d399;
+  --accent-danger: #f87171;
+  --gradient-brand: linear-gradient(120deg, #22d3ee 0%, #818cf8 100%);
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+
+  --shadow-card: 0 8px 32px rgba(2, 6, 23, 0.5);
+  --shadow-glow: 0 0 32px rgba(34, 211, 238, 0.22);
+
+  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+
+  /* 响应式断点参考：sm 640 / md 960 / lg 1280（px），JS 侧如需判断保持一致 */
+}
