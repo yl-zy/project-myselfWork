@@ -35,11 +35,13 @@ export interface NationSummary {
   top_net_in?: RankItem[]
 }
 
-/** 省级视角聚合（§4.5） */
+/** 省级视角聚合（§4.5）：按最近 window_minutes 分钟窗口统计 */
 export interface ProvinceSummary {
   batch_time: string | null
   level: string
   province: { code: string; name: string }
+  /** 聚合窗口分钟数（服务端口径，当前 10） */
+  window_minutes?: number
   total_in: number
   total_out: number
   net: number

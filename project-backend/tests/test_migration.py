@@ -112,8 +112,56 @@ def test_summary_province_net_consistency():
     body = resp.json()
     assert body["province"]["code"] == code
     assert body["net"] == body["total_in"] - body["total_out"]
-    assert body["total_in"] == sum(item["people"] for item in body["in_from"])
-    assert body["total_out"] == sum(item["people"] for item in body["out_to"])
+    # 窗口口径下 in_from/out_to 为 Top10 截断榜单，总和不超过总量
+    assert sum(item["people"] for item in body["in_from"]) <= body["total_in"]
+    assert sum(item["people"] for item in body["out_to"]) <= body["total_out"]
+
+
+def test_summary_province_window_aggregates_multiple_batches():
+    """省级 summary 按时间窗聚合：T1/T2 两批都在窗口内（未来时间满足 ≥ now-10min），应全部计入"""
+    seed_two_batches()
+    code = client.get("/api/migration/flows").json()["records"][0]["to_code"]
+    body = client.get(
+        "/api/migration/summary", params={"level": "province", "province": code}
+    ).json()
+    assert body["window_minutes"] == 10
+    db = SessionLocal()
+    try:
+        expect_in = db.scalar(
+            text(
+                "SELECT COALESCE(SUM(people),0) FROM migration_records "
+                "WHERE to_code=:c AND batch_time IN ("
+                "'2099-01-01 10:00:00', '2099-01-02 10:00:00')"
+            ),
+            {"c": code},
+        )
+    finally:
+        db.close()
+    # 窗口内可能混入真实生成数据，接口值不小于两批种子之和
+    assert body["total_in"] >= expect_in
+
+
+def test_flows_province_first_load_returns_window_batches():
+    """省级 flows 首次加载（无 since）返回窗口内全部批次，而非仅最新一批"""
+    seed_two_batches()
+    latest = client.get("/api/migration/flows").json()
+    code = latest["records"][0]["from_code"]
+    body = client.get(
+        "/api/migration/flows", params={"level": "province", "province": code}
+    ).json()
+    db = SessionLocal()
+    try:
+        expect = db.scalar(
+            text(
+                "SELECT COUNT(*) FROM migration_records "
+                "WHERE (from_code=:c OR to_code=:c) AND batch_time IN ("
+                "'2099-01-01 10:00:00', '2099-01-02 10:00:00')"
+            ),
+            {"c": code},
+        )
+    finally:
+        db.close()
+    assert len(body["records"]) >= expect
 
 
 def test_cleanup_expired_removes_old_keeps_recent():
