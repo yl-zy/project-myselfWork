@@ -1,13 +1,10 @@
 import {
   BillboardCollection,
   BoundingSphere,
-  CallbackPositionProperty,
-  CallbackProperty,
   Cartesian2,
   Cartesian3,
   Color,
   HeadingPitchRange,
-  HeadingPitchRoll,
   HorizontalOrigin,
   ImageryLayer,
   Math as CesiumMath,
@@ -15,7 +12,6 @@ import {
   PolylineDashMaterialProperty,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
-  Transforms,
   UrlTemplateImageryProvider,
   VerticalOrigin,
   Viewer,
@@ -54,9 +50,6 @@ const STATUS_COLOR_DIM: Record<DroneStatus, Color> = {
   charging: STATUS_COLOR_OBJ.charging.withAlpha(0.16),
 }
 
-const MODEL_URI = '/drone.glb'
-/** glb 模型前向为 +X（东），heading 自正北顺时针，需 -90° 修正机头朝向 */
-const MODEL_HEADING_OFFSET = -Math.PI / 2
 const DRONE_SCALE = 0.62
 const DRONE_SCALE_SELECTED = 1.15
 const DRONE_SCALE_HOVER = 0.95
@@ -104,15 +97,15 @@ export class FleetScene {
   private readonly items = new Map<string, DroneItem>()
   private readonly stations = new Map<string, Entity>()
   private baseEntity: Entity | null = null
-  private modelEntity: Entity | null = null
   private routeEntities: Entity[] = []
 
   private selectedId: string | null = null
   private hoveredId: string | null = null
   private filter: DroneStatus | null = null
-
-  private selectedPos = Cartesian3.ZERO
-  private selectedQuat = Transforms.headingPitchRollQuaternion(Cartesian3.ZERO, new HeadingPitchRoll())
+  /** 跟随视角：相机每帧 lookAt 选中机的 Billboard 位置（而非 trackEntity，避免模型锚点偏移） */
+  private following = false
+  /** 跟随视角的相机偏移（setFollow 时固定，跟全程） */
+  private followOffset: HeadingPitchRange | null = null
 
   private rafId = 0
   private lastPick = 0
@@ -156,6 +149,14 @@ export class FleetScene {
     this.billboards = this.viewer.scene.primitives.add(new BillboardCollection())
     this.handler = new ScreenSpaceEventHandler(this.viewer.scene.canvas)
     this.bindPointer()
+
+    // 初始视角：从默认北美洲平滑飞到南京基站上空（后端 BASE_LNG=118.796 BASE_LAT=32.06），
+    // 不等第一波快照；第一波 applySnapshot 后再由 overview() 平滑切换到机队包围球
+    const center = Cartesian3.fromDegrees(118.796, 32.06, 0)
+    this.viewer.camera.flyToBoundingSphere(new BoundingSphere(center, 22000), {
+      duration: 2.2,
+      offset: new HeadingPitchRange(0, CesiumMath.toRadians(-52), 22000 * 1.4),
+    })
 
     this.loop()
   }
@@ -275,14 +276,15 @@ export class FleetScene {
   selectDrone(id: string): void {
     this.selectedId = id
     this.viewer.trackedEntity = undefined
-    this.ensureModel()
+    this.following = false
+    this.followOffset = null
     this.clearRoute()
     this.refreshLook()
 
     const item = this.items.get(id)
     if (!item) return
     this.viewer.camera.flyToBoundingSphere(new BoundingSphere(Cartesian3.clone(item.to), 80), {
-      duration: 1.0,
+      duration: 2.0,
       offset: new HeadingPitchRange(CesiumMath.toRadians(15), CesiumMath.toRadians(-32), 900),
     })
   }
@@ -328,18 +330,36 @@ export class FleetScene {
     )
   }
 
-  /** 跟随机头视角（相机锁定选中机模型） */
+  /** 跟随机头视角：相机跟随选中机 Billboard 的实时插值位置（无模型锚点误差） */
   setFollow(enabled: boolean): void {
-    this.viewer.trackedEntity = enabled && this.selectedId ? this.modelEntity ?? undefined : undefined
+    this.viewer.trackedEntity = undefined
+    if (enabled && this.selectedId) {
+      // 从当前相机位置推算一个合适的俯视偏移，记住后跟全程
+      const item = this.items.get(this.selectedId)
+      const center = item ? Cartesian3.clone(item.scratch) : this.viewer.camera.position
+      const range = Cartesian3.distance(this.viewer.camera.position, center) || 1200
+      this.followOffset = new HeadingPitchRange(
+        this.viewer.camera.heading,
+        Math.max(CesiumMath.toRadians(-70), this.viewer.camera.pitch),
+        range,
+      )
+      this.following = true
+    } else {
+      this.following = false
+      this.followOffset = null
+    }
   }
 
-  /** 取消选中：清路线、收模型、回到自由视角 */
+  /** 取消选中：清路线、切回机队总览 */
   clearSelection(): void {
     this.selectedId = null
+    this.following = false
+    this.followOffset = null
     this.viewer.trackedEntity = undefined
-    if (this.modelEntity) this.modelEntity.show = false
     this.clearRoute()
     this.refreshLook()
+    // 取消选中 = 回到总览视角（用户明确要求）
+    this.overview()
   }
 
   /** 机队总览：按当前机群包围球拉远俯瞰 */
@@ -349,7 +369,7 @@ export class FleetScene {
     if (points.length === 0) return
     const sphere = BoundingSphere.fromPoints(points)
     this.viewer.camera.flyToBoundingSphere(sphere, {
-      duration: 1.4,
+      duration: 2,
       offset: new HeadingPitchRange(0, CesiumMath.toRadians(-52), sphere.radius * 2.4),
     })
   }
@@ -408,28 +428,12 @@ export class FleetScene {
     }
   }
 
-  private ensureModel(): void {
-    if (this.modelEntity) {
-      this.modelEntity.show = true
-      return
-    }
-    this.modelEntity = this.viewer.entities.add({
-      position: new CallbackPositionProperty(() => this.selectedPos, false),
-      orientation: new CallbackProperty(() => this.selectedQuat, false),
-      model: {
-        uri: MODEL_URI,
-        minimumPixelSize: 96,
-        maximumScale: 600,
-      },
-    })
-  }
-
   private clearRoute(): void {
     this.routeEntities.forEach((e) => this.viewer.entities.remove(e))
     this.routeEntities = []
   }
 
-  /** 每帧：快照间插值推位置与航向；选中机的模型跟随插值位置 */
+  /** 每帧：快照间插值推位置与航向；跟随时相机 lookAt 选中机的 Billboard 位置 */
   private loop = (): void => {
     const now = performance.now()
     for (const item of this.items.values()) {
@@ -441,16 +445,11 @@ export class FleetScene {
       item.billboard.rotation = -CesiumMath.toRadians(item.headingCurrent)
     }
 
-    if (this.selectedId) {
+    if (this.following && this.selectedId && this.followOffset) {
       const item = this.items.get(this.selectedId)
       if (item) {
-        this.selectedPos = Cartesian3.clone(item.scratch)
-        const hpr = new HeadingPitchRoll(
-          CesiumMath.toRadians(item.headingCurrent) + MODEL_HEADING_OFFSET,
-          0,
-          0,
-        )
-        this.selectedQuat = Transforms.headingPitchRollQuaternion(this.selectedPos, hpr)
+        // 每帧 lookAt：相机聚焦 Billboard 的实时插值位置，无模型锚点误差
+        this.viewer.camera.lookAt(item.scratch, this.followOffset)
       }
     }
 

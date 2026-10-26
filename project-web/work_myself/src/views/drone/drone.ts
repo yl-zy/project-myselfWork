@@ -136,6 +136,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
 
   // ---- 数据链路 ----
   function applySnapshot(res: DroneSnapshot): void {
+    const isFirst = loading.value
     snapshot.value = res
     lastUpdated.value = res.ts
     connected.value = true
@@ -152,6 +153,9 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
       unique.push(d.station)
     }
     scene?.setStations(unique)
+
+    // 第一波数据到达：相机从"基站上空"平滑过渡到"机队包围球总览"
+    if (isFirst) scene?.overview()
   }
 
   async function pull(): Promise<void> {
@@ -206,7 +210,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
 
   function backToOverview(): void {
     clearSelection()
-    scene?.overview()
+    // scene.clearSelection 内部已自动 overview()，无需再调
   }
 
   function toggleFollow(): void {
