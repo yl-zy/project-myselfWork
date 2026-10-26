@@ -6,8 +6,9 @@
 - 限流走 rate_limit_daily 表（MySQL 持久化，重启不可绕过）
 """
 
+import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -210,10 +211,10 @@ def _persist_round(
     return assistant
 
 
-def _session_event_stream(session_id: int, question: str) -> Iterator[str]:
+async def _session_event_stream(session_id: int, question: str) -> AsyncIterator[str]:
     """登录用户的事件流：边生成边推送，结束后落库；客户端中断保留已生成部分
 
-    生成器执行发生在响应发送阶段，请求作用域的 db 可能已被框架回收，
+    generator 执行发生在响应发送阶段，请求作用域的 db 可能已被框架回收，
     因此这里自行管理数据库会话。
     """
 
@@ -225,6 +226,7 @@ def _session_event_stream(session_id: int, question: str) -> Iterator[str]:
             if event["type"] == "token":
                 chunks.append(event["data"])
                 yield sse("token", event["data"])
+                await asyncio.sleep(0.04)  # 每个 token chunk 间停 40ms，模拟真 LLM 吐 token 节奏
             elif event["type"] == "sources":
                 sources = event["data"]
                 yield sse("sources", sources)
@@ -257,12 +259,13 @@ def _session_event_stream(session_id: int, question: str) -> Iterator[str]:
         db.close()
 
 
-def _guest_event_stream(question: str) -> Iterator[str]:
+async def _guest_event_stream(question: str) -> AsyncIterator[str]:
     """访客事件流：单轮、不建会话、不落库"""
 
     for event in stream_answer(question):
         if event["type"] == "token":
             yield sse("token", event["data"])
+            await asyncio.sleep(0.04)
         elif event["type"] == "sources":
             yield sse("sources", event["data"])
     yield sse("done", {"message_id": None})

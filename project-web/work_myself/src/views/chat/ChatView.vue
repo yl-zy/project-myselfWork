@@ -130,7 +130,10 @@ watch(input, (v) => {
                   </template>
                   <template v-else>
                     <button class="op-btn" type="button" title="重命名" @click="startRename(s)">
-                      ✎
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                      </svg>
                     </button>
                     <button
                       class="op-btn"
@@ -138,7 +141,13 @@ watch(input, (v) => {
                       title="删除"
                       @click="askDelete(s.id)"
                     >
-                      ✕
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6" />
+                        <path d="M14 11v6" />
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                      </svg>
                     </button>
                   </template>
                 </div>
@@ -197,8 +206,15 @@ watch(input, (v) => {
               {{ m.role === 'user' ? '我' : 'AI' }}
             </div>
             <div class="msg-bubble" :class="[m.role, m.status]">
+              <!-- 思考中：三点跳动动画 -->
+              <template v-if="m.status === 'thinking'">
+                <div class="msg-thinking">
+                  <span class="thinking-label">AI 正在思考</span>
+                  <span class="thinking-dots"><i /><i /><i /></span>
+                </div>
+              </template>
               <!-- 流式中：纯文本 + 呼吸光标，避免半截 Markdown 闪烁 -->
-              <template v-if="m.status === 'streaming'">
+              <template v-else-if="m.status === 'streaming'">
                 <p v-if="m.content" class="msg-plain">{{ m.content }}</p>
                 <span class="cursor" />
               </template>

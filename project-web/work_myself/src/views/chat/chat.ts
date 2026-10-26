@@ -22,7 +22,7 @@ export interface UiMessage {
   id: number | null
   role: 'user' | 'assistant'
   content: string
-  status: 'streaming' | 'done' | 'interrupted'
+  status: 'thinking' | 'streaming' | 'done' | 'interrupted'
   sources: SourceItem[] | null
 }
 
@@ -81,6 +81,8 @@ export function useChat(messagesEl: Readonly<ShallowRef<HTMLElement | null>>) {
   let abortController: AbortController | null = null
   /** 用户是否停留在底部附近（上翻阅读时不强制滚动） */
   let nearBottom = true
+
+  // ---- 打字机：onDone 内 setTimeout 递归，零全局变量 ----
 
   const isGuest = computed(() => !userStore.isLoggedIn)
   const inputCount = computed(() => input.value.length)
@@ -240,21 +242,51 @@ export function useChat(messagesEl: Readonly<ShallowRef<HTMLElement | null>>) {
     input.value = ''
     sending.value = true
     pushMessage('user', 'done').content = content
-    const assistantMsg = pushMessage('assistant', 'streaming')
+    // 先显示"思考中..."，等 SSE 全部收完后再切成 streaming 启动打字机
+    const assistantMsg = pushMessage('assistant', 'thinking')
     void scrollToBottom(true)
 
     abortController = new AbortController()
+    let collected = '' // SSE 收集中的完整回答
     const callbacks = {
       onToken: (chunk: string) => {
-        assistantMsg.content += chunk
-        void scrollToBottom()
+        collected += chunk
       },
       onSources: (sources: SourceItem[]) => {
         assistantMsg.sources = sources
       },
       onDone: (messageId: number | null) => {
-        assistantMsg.id = messageId
-        assistantMsg.status = 'done'
+        console.log('[chat] onDone called, collected.length=', collected.length)
+        const full = collected
+        let i = 0
+
+        // 通过 messages.value 内的 proxy 元素更新，确保 Vue 响应式稳定触发
+        const getMsg = (): UiMessage => messages.value[messages.value.length - 1]
+
+        getMsg().status = 'streaming'
+
+        const tick = (): void => {
+          const m = messages.value[messages.value.length - 1]
+          console.log('[typer] tick i=', i, 'fullLen=', full.length, 'msgStatus=', m?.status)
+          if (!m || m.status === 'interrupted') return // 已中断则停止
+          if (i >= full.length) {
+            // 打完了，标 done
+            m.id = messageId
+            m.status = 'done'
+            void scrollToBottom()
+            return
+          }
+          i++
+          m.content = full.slice(0, i)
+          void scrollToBottom()
+          // 动态节奏：句末/换行多停
+          let delay = 25 + Math.random() * 10
+          const ch = full[i - 1]
+          if (ch === '。' || ch === '！' || ch === '？' || ch === '.' || ch === '!' || ch === '?') delay = 55 + Math.random() * 30
+          else if (ch === '\n') delay = 60 + Math.random() * 30
+          setTimeout(tick, delay)
+        }
+        tick()
       },
     }
 
@@ -266,18 +298,32 @@ export function useChat(messagesEl: Readonly<ShallowRef<HTMLElement | null>>) {
       } else {
         await streamGuestMessage(content, callbacks, abortController.signal)
       }
-      if (assistantMsg.status === 'streaming') assistantMsg.status = 'done'
+      // await 在此返回意味着 SSE 已读完，但打字可能还没追平
     } catch (err) {
-      // 前端主动中断：保留已生成内容，标记 interrupted
+      // 注意：打字机是 setTimeout 递归，异常时它仍会继续 tick（因为闭包已捕获 full/i）
+      // 所以这里需要让中断后的打字机"感知到中断"——用 status 判断
+      // 最简单的做法：让 tick 在每次执行前检查 status，如果已 interrupted 就停
+      // 但为了保持极简，这里直接让异常分支覆盖逻辑继续工作即可
+
+      // 前端主动中断
       if (err instanceof DOMException && err.name === 'AbortError') {
+        if (assistantMsg.status === 'thinking') {
+          // 思考阶段就停
+          assistantMsg.content = collected
+        } else if (assistantMsg.content === '' && collected !== '') {
+          assistantMsg.content = collected
+        }
         assistantMsg.status = 'interrupted'
-      } else if (assistantMsg.content) {
-        // 流中途断开：保留已有内容，提示异常
+      } else if (assistantMsg.status === 'thinking') {
+        // 流开始前失败（限流/参数错误）：移除占位消息
+        messages.value = messages.value.filter((m) => m.key !== assistantMsg.key)
+      } else {
+        // 打字中途断开
+        if (assistantMsg.content === '' && collected !== '') {
+          assistantMsg.content = collected
+        }
         assistantMsg.status = 'interrupted'
         toast.error(err instanceof ApiError ? err.message : '连接中断，回答未完整')
-      } else {
-        // 流开始前就失败（限流/参数错误）：移除占位消息，错误由拦截器 toast
-        messages.value = messages.value.filter((m) => m.key !== assistantMsg.key)
       }
     } finally {
       sending.value = false
@@ -296,13 +342,12 @@ export function useChat(messagesEl: Readonly<ShallowRef<HTMLElement | null>>) {
   // ---- 登录态切换：访客 ↔ 登录互切时重置现场 ----
   watch(
     () => userStore.isLoggedIn,
-    (loggedIn) => {
+    () => {
       abortController?.abort()
       sending.value = false
       messages.value = []
       activeSessionId.value = null
       sessions.value = []
-      if (loggedIn) void loadSessions(true)
     },
   )
 

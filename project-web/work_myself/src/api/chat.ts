@@ -108,6 +108,7 @@ async function ssePost(
 
   // 后端所有事件的 data 统一走 json.dumps，token 也是 JSON 字符串字面量，需解析还原
   const dispatch = (data: string): void => {
+    console.log('[sse] dispatch event=', currentEvent, 'dataLen=', data.length)
     if (currentEvent === 'token') {
       try {
         callbacks.onToken(JSON.parse(data) as string)
@@ -127,17 +128,23 @@ async function ssePost(
       } catch {
         // done 无 body 时按 null 处理
       }
+      console.log('[sse] calling onDone with message_id=', messageId)
       callbacks.onDone?.(messageId)
     }
   }
 
   for (;;) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      console.log('[sse] reader.read() returned done=true, remaining buffer=', JSON.stringify(buffer))
+      break
+    }
     buffer += decoder.decode(value, { stream: true })
+    console.log('[sse] got chunk, bufferLen=', buffer.length, 'bufferTail=', JSON.stringify(buffer.slice(-50)))
 
     // SSE 以空行为事件边界，逐行解析 event:/data:
     let sepIndex = buffer.indexOf('\n\n')
+    let parseCount = 0
     while (sepIndex !== -1) {
       const rawEvent = buffer.slice(0, sepIndex)
       buffer = buffer.slice(sepIndex + 2)
@@ -145,8 +152,10 @@ async function ssePost(
         if (line.startsWith('event:')) currentEvent = line.slice(6).trim()
         else if (line.startsWith('data:')) dispatch(line.slice(5).trimStart())
       }
+      parseCount++
       sepIndex = buffer.indexOf('\n\n')
     }
+    if (parseCount > 0) console.log('[sse] parsed', parseCount, 'events, remaining buffer=', JSON.stringify(buffer))
   }
 }
 
