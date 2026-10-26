@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, useTemplateRef } from 'vue'
 import { STATUS_META, STATUS_ORDER, useDroneScreen } from './drone'
+import { useStatsPanel } from './statsPanel'
 import './drone.css'
 
 const cesiumEl = useTemplateRef<HTMLElement>('cesiumEl')
+const statsPieEl = useTemplateRef<HTMLElement>('statsPieEl')
+const statsBarEl = useTemplateRef<HTMLElement>('statsBarEl')
 
 const {
   loading,
   live,
   connected,
+  snapshot,
   stats,
   baseName,
   statusFilter,
@@ -37,6 +41,9 @@ const {
 } = useDroneScreen(cesiumEl)
 
 const selectedBattery = computed(() => selectedBrief.value?.battery ?? 0)
+
+// 数据统计面板：六态分布 + 电量分布，随 2s 快照实时更新（statsPanel.ts 内部管理 echarts 生命周期）
+useStatsPanel(statsPieEl, statsBarEl, snapshot)
 </script>
 
 <template>
@@ -265,6 +272,44 @@ const selectedBattery = computed(() => selectedBrief.value?.battery ?? 0)
           {{ follow ? '退出跟随' : '跟随视角' }}
         </button>
         <button class="ctrl-btn" type="button" @click="clearSelection">取消选中</button>
+      </div>
+    </aside>
+
+    <!-- 数据统计面板：六态分布 + 电量分布，随 2s 快照实时更新 -->
+    <aside class="panel stats-panel">
+      <h3 class="panel-title"><span class="panel-mark violet" />数据统计</h3>
+
+      <div class="stats-kpi">
+        <div class="kpi">
+          <b>{{ stats?.total ?? 0 }}</b>
+          <span>机队</span>
+        </div>
+        <div class="kpi">
+          <b class="kpi-accent">{{ activeCount }}</b>
+          <span>空中</span>
+        </div>
+        <div class="kpi">
+          <b>{{ stats?.active_orders ?? 0 }}</b>
+          <span>在途</span>
+        </div>
+        <div class="kpi">
+          <b>{{ stats?.completed_orders ?? 0 }}</b>
+          <span>完成</span>
+        </div>
+        <div class="kpi">
+          <b class="kpi-accent">{{ stats ? `${stats.avg_battery.toFixed(1)}%` : '--' }}</b>
+          <span>均电</span>
+        </div>
+      </div>
+
+      <div class="chart-block">
+        <p class="chart-title">六态分布</p>
+        <div ref="statsPieEl" class="chart-box" />
+      </div>
+
+      <div class="chart-block">
+        <p class="chart-title">电量区间</p>
+        <div ref="statsBarEl" class="chart-box" />
       </div>
     </aside>
 

@@ -674,6 +674,87 @@
   text-align: center;
 }
 
+/* ---- 数据统计面板：六态分布 + 电量区间 ---- */
+.stats-panel {
+  position: absolute;
+  right: 24px;
+  bottom: 52px;
+  width: 336px;
+  max-height: calc(100vh - 350px);
+  overflow-y: auto;
+  z-index: 9;
+}
+
+.stats-panel::-webkit-scrollbar {
+  width: 4px;
+}
+
+.stats-panel::-webkit-scrollbar-thumb {
+  background: rgba(34, 211, 238, 0.25);
+  border-radius: 2px;
+}
+
+.stats-kpi {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  margin-bottom: 14px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.kpi {
+  padding: 8px 2px;
+  text-align: center;
+  background: var(--bg-panel);
+}
+
+.kpi b {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kpi b.kpi-accent {
+  color: var(--accent);
+}
+
+.kpi span {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.chart-block {
+  margin-top: 14px;
+}
+
+.chart-block:first-of-type {
+  margin-top: 0;
+}
+
+.chart-title {
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.chart-box {
+  width: 100%;
+  height: 150px;
+}
+
+/* 选中单机时：详情面板占据右侧，统计面板临时移往左下，避免重叠 */
+.drone-page:has(.detail-panel) .stats-panel {
+  right: auto;
+  left: 24px;
+}
+
 /* ---- 悬浮提示 ---- */
 .hover-tip {
   position: absolute;
@@ -756,6 +837,10 @@
     width: 300px;
   }
 
+  .stats-panel {
+    width: 300px;
+  }
+
   .stat {
     min-width: 74px;
     padding: 0 10px;
@@ -783,6 +868,11 @@
   .detail-panel {
     width: 280px;
   }
+
+  .stats-panel {
+    width: 280px;
+    bottom: 48px;
+  }
 }
 
 @media (max-width: 960px) {
@@ -804,6 +894,17 @@
     width: 260px;
   }
 
+  .stats-panel {
+    right: 12px;
+    left: auto;
+    width: 260px;
+  }
+
+  .drone-page:has(.detail-panel) .stats-panel {
+    right: 12px;
+    left: auto;
+  }
+
   .page-sub {
     display: none;
   }
@@ -821,6 +922,28 @@
     bottom: 52px;
     width: auto;
     max-height: 42vh;
+  }
+
+  .stats-panel {
+    left: 12px;
+    right: 12px;
+    top: 200px;
+    bottom: auto;
+    width: auto;
+    max-height: none;
+    margin: 0 auto;
+    max-width: 420px;
+  }
+
+  .stats-panel .chart-box {
+    height: 120px;
+  }
+
+  .drone-page:has(.detail-panel) .stats-panel {
+    left: 12px;
+    right: 12px;
+    top: 200px;
+    bottom: auto;
   }
 
   .stat-strip {

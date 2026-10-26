@@ -33,6 +33,7 @@
   left: 50%;
   transform: translateX(-70%);
   background: rgba(34, 211, 238, 0.1);
+  animation: float-glow-a 9s ease-in-out infinite;
 }
 
 .glow-b {
@@ -41,6 +42,27 @@
   top: 30%;
   right: -180px;
   background: rgba(129, 140, 248, 0.09);
+  animation: float-glow-b 13s ease-in-out infinite;
+}
+
+@keyframes float-glow-a {
+  0%,
+  100% {
+    transform: translateX(-70%) translateY(0);
+  }
+  50% {
+    transform: translateX(-60%) translateY(22px);
+  }
+}
+
+@keyframes float-glow-b {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-18px, 14px);
+  }
 }
 
 /* ---- 顶部导航 ---- */
@@ -305,5 +327,185 @@
 
   .nav-user {
     font-size: 13px;
+  }
+}
+
+/* =========================================================
+   视觉冲击力增强：scroll-reveal / 统计条 / 卡片磁吸光效
+   ========================================================= */
+
+/* ---- scroll-reveal 入场 ---- */
+.reveal {
+  opacity: 0;
+  translate: 0 34px;
+  transition:
+    opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+    translate 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--rd, 0ms);
+  will-change: opacity, translate;
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  translate: 0 0;
+}
+
+/* hero 区内元素轻微错落 */
+.hero .hero-badge {
+  transition-delay: 80ms;
+}
+.hero .hero-title {
+  transition-delay: 180ms;
+}
+.hero .hero-sub {
+  transition-delay: 300ms;
+}
+
+/* hero 标题渐变流动 */
+.hero-title .text-gradient {
+  background-size: 200% auto;
+  animation: gradient-flow 6s ease-in-out infinite;
+}
+
+@keyframes gradient-flow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* ---- 平台数据总览统计条 ---- */
+.stats {
+  position: relative;
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: 0 clamp(20px, 5vw, 64px) 64px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  transition-delay: 120ms;
+}
+
+.stat-card {
+  position: relative;
+  overflow: hidden;
+  padding: 28px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  text-align: center;
+  transition:
+    border-color 0.3s ease,
+    background 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.stat-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--tone, var(--border-strong));
+  box-shadow: var(--shadow-card), 0 0 26px var(--tone, rgba(34, 211, 238, 0.25));
+}
+
+.stat-num {
+  font-family: var(--font-mono);
+  font-size: clamp(30px, 3.6vw, 42px);
+  font-weight: 800;
+  line-height: 1;
+  color: var(--tone, var(--accent));
+  text-shadow: 0 0 20px var(--tone, var(--accent));
+}
+
+.stat-suffix {
+  font-size: 20px;
+  margin-left: 2px;
+}
+
+.stat-label {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+/* ---- 卡片磁吸光效 ---- */
+/* 让卡片内容盖在光晕之上 */
+.module-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 跟随鼠标的 radial-glare 光晕 */
+.module-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    520px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(34, 211, 238, 0.16),
+    transparent 46%
+  );
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.module-card:hover::before {
+  opacity: 1;
+}
+
+/* 顶部流光边线 */
+.module-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 22px;
+  right: 22px;
+  height: 1px;
+  z-index: 1;
+  background: var(--gradient-brand);
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+  transition:
+    transform 0.45s ease,
+    opacity 0.45s ease;
+  pointer-events: none;
+}
+
+.module-card:hover::after,
+.module-card:focus-visible::after {
+  transform: scaleX(1);
+  opacity: 0.85;
+}
+
+/* ---- 统计条小屏/降级适配 ---- */
+@media (max-width: 640px) {
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    padding-bottom: 44px;
+  }
+
+  .stat-card {
+    padding: 20px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    translate: 0 0;
+    transition: none;
+  }
+
+  .glow-a,
+  .glow-b,
+  .hero-title .text-gradient {
+    animation: none;
   }
 }

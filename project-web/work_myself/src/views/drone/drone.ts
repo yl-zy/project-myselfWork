@@ -261,6 +261,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
     loading,
     live,
     connected,
+    snapshot,
     stats,
     drones,
     baseName,

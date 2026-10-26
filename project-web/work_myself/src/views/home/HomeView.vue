@@ -3,7 +3,17 @@ import ModuleIcon from '@/components/ModuleIcon.vue'
 import { moduleCards, useHome } from './home'
 import './home.css'
 
-const { userStore, goModule, logout } = useHome()
+const {
+  userStore,
+  goModule,
+  logout,
+  platformStats,
+  observe,
+  bindStat,
+  handleCardMove,
+  handleCardLeave,
+  revealDelayStyle,
+} = useHome()
 </script>
 
 <template>
@@ -31,26 +41,51 @@ const { userStore, goModule, logout } = useHome()
     </header>
 
     <main class="hero">
-      <p class="hero-badge">FULL-STACK PORTFOLIO</p>
-      <h1 class="hero-title">
+      <p class="hero-badge reveal" :ref="observe">FULL-STACK PORTFOLIO</p>
+      <h1 class="hero-title reveal" :ref="observe">
         前端工程能力<br />
         <span class="text-gradient">全景演示作品</span>
       </h1>
-      <p class="hero-sub">
+      <p class="hero-sub reveal" :ref="observe">
         Vue 3 · TypeScript · FastAPI · WebSocket · SSE · GIS 三维可视化
         <br class="hero-br" />
         五个模块，讲清从像素到数据的全链路
       </p>
     </main>
 
+    <section class="stats reveal" :ref="observe">
+      <div
+        v-for="(stat, i) in platformStats"
+        :key="stat.label"
+        class="stat-card"
+        :style="{ '--tone': stat.tone }"
+      >
+        <div class="stat-num">
+          <span
+            class="stat-value"
+            :data-count="stat.value"
+            :data-dur="800"
+            :data-delay="i * 90"
+            :ref="bindStat"
+          >0</span>
+          <span class="stat-suffix">{{ stat.suffix }}</span>
+        </div>
+        <p class="stat-label">{{ stat.label }}</p>
+      </div>
+    </section>
+
     <section class="cards">
       <article
-        v-for="card in moduleCards"
+        v-for="(card, i) in moduleCards"
         :key="card.key"
-        class="module-card"
+        class="module-card reveal"
+        :style="revealDelayStyle(i)"
+        :ref="observe"
         tabindex="0"
         @click="goModule(card.path)"
         @keydown.enter="goModule(card.path)"
+        @mousemove="handleCardMove"
+        @mouseleave="handleCardLeave"
       >
         <div class="card-icon">
           <ModuleIcon :name="card.key" />
