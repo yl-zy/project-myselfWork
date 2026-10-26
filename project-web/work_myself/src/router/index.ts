@@ -57,4 +57,26 @@ router.afterEach((to) => {
   setCurrentPage(to.path)
 })
 
+/**
+ * 路由预取：首页加载后浏览器空闲时提前下载最重的两个 chunk（无人机 4MB + 人口流动 300KB），
+ * 用户点击时 chunk 已在缓存，实现"秒进"。
+ * 不执行组件逻辑，仅触发 chunk 下载到 HTTP 缓存。
+ */
+let prefetched = false
+function schedulePrefetch(): void {
+  if (prefetched) return
+  prefetched = true
+  const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => void })
+    .requestIdleCallback
+  const run = () => {
+    void import('@/views/drone/DroneView.vue').catch(() => {})
+    void import('@/views/migration/MigrationView.vue').catch(() => {})
+  }
+  if (idle) idle(run)
+  else window.setTimeout(run, 1500)
+}
+router.afterEach((to) => {
+  if (to.path === '/') schedulePrefetch()
+})
+
 export default router

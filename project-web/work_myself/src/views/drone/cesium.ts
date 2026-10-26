@@ -4,14 +4,18 @@ import {
   Cartesian2,
   Cartesian3,
   Color,
+  Ellipsoid,
   HeadingPitchRange,
   HorizontalOrigin,
   ImageryLayer,
   Math as CesiumMath,
+  Matrix3,
+  Matrix4,
   NearFarScalar,
   PolylineDashMaterialProperty,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  Transforms,
   UrlTemplateImageryProvider,
   VerticalOrigin,
   Viewer,
@@ -54,8 +58,8 @@ const DRONE_SCALE = 0.62
 const DRONE_SCALE_SELECTED = 1.15
 const DRONE_SCALE_HOVER = 0.95
 const DRONE_SCALE_DIM = 0.3
-/** 两次快照之间的插值时长（略小于 2s 轮询间隔，视觉连续） */
-const INTERP_MS = 1800
+/** 外推上限：快照长时间未到时停止外推，避免断连时无人机直线飘出视野 */
+const EXTRA_CLAMP_MS = 3000
 const HOVER_PICK_INTERVAL = 70
 
 export interface FleetSceneCallbacks {
@@ -69,14 +73,14 @@ interface DroneItem {
   id: string
   status: DroneStatus
   billboard: Billboard
-  /** 插值起止位置（ECEF）与起始时刻 */
-  from: Cartesian3
+  /** 本拍目标位置（ECEF），外推的起点 */
   to: Cartesian3
-  start: number
-  /** 航向插值（度，顺时针自正北） */
-  headingFrom: number
+  /** 上次快照到达时刻，用于速度外推计时 */
+  lastSnapAt: number
+  /** 由 speed+heading 构造的瞬时速度（ECEF/ms），静止时为 null */
+  velocity: Cartesian3 | null
+  /** 当前航向（度，顺时针自正北） */
   headingTo: number
-  headingCurrent: number
   /** 每帧复用的位置对象，避免 GC 抖动 */
   scratch: Cartesian3
 }
@@ -109,6 +113,13 @@ export class FleetScene {
 
   private rafId = 0
   private lastPick = 0
+  /** 外推时复用的临时向量，避免每帧分配对象 */
+  private readonly extrapolateScratch = new Cartesian3()
+  /** ENU→ECEF 的变换矩阵与东/北轴 scratch，用于把 speed+heading 构造成 ECEF 速度向量 */
+  private readonly transformScratch = new Matrix4()
+  private readonly matrix3Scratch = new Matrix3()
+  private readonly eastAxis = new Cartesian3()
+  private readonly northAxis = new Cartesian3()
 
   private constructor(target: HTMLElement, callbacks: FleetSceneCallbacks) {
     this.cb = callbacks
@@ -134,8 +145,10 @@ export class FleetScene {
       fullscreenButton: false,
       infoBox: false,
       selectionIndicator: false,
-      // 保留 WebGL 绘图缓冲，否则自动化截图/录屏读到的 canvas 为全黑
-      contextOptions: { webgl: { preserveDrawingBuffer: true } },
+      requestRenderMode: true,
+      maximumRenderTimeChange: Number.POSITIVE_INFINITY,
+      // 开发环境保留绘图缓冲供自动化截图使用，生产环境关闭以减少 GPU 开销。
+      contextOptions: { webgl: { preserveDrawingBuffer: import.meta.env.DEV } },
     })
     // 未使用 ion 服务，默认 credit 会从 cesium.com 拉 logo（国内加载失败显示裂图），隐藏
     const credit = this.viewer.cesiumWidget.creditContainer as HTMLElement
@@ -157,8 +170,6 @@ export class FleetScene {
       duration: 2.2,
       offset: new HeadingPitchRange(0, CesiumMath.toRadians(-52), 22000 * 1.4),
     })
-
-    this.loop()
   }
 
   static create(target: HTMLElement, callbacks: FleetSceneCallbacks): FleetScene {
@@ -193,22 +204,25 @@ export class FleetScene {
           id: d.id,
           status: d.status,
           billboard,
-          from: Cartesian3.clone(target),
           to: target,
-          start: now - INTERP_MS,
-          headingFrom: d.heading,
+          lastSnapAt: now,
+          velocity: null,
           headingTo: d.heading,
-          headingCurrent: d.heading,
           scratch: Cartesian3.clone(target),
         }
         this.items.set(d.id, item)
       } else {
-        item.from = Cartesian3.clone(item.scratch)
+        // 用后端 speed+heading 直接构造瞬时速度（零滞后），拐弯时方向准确、外推不偏离
+        item.velocity = this.buildVelocity(target, d, item.velocity)
         item.to = target
-        item.start = now
-        item.headingFrom = item.headingCurrent
+        item.lastSnapAt = now
         item.headingTo = d.heading
         item.status = d.status
+        item.billboard.rotation = -CesiumMath.toRadians(d.heading)
+        if (!item.velocity) {
+          Cartesian3.clone(target, item.scratch)
+          item.billboard.position = item.scratch
+        }
       }
     }
 
@@ -219,6 +233,28 @@ export class FleetScene {
     }
 
     this.refreshLook()
+    this.scheduleLoop()
+  }
+
+  /**
+   * 由后端 speed(m/s) + heading(顺时针自北) 构造 ECEF 速度向量（m/ms），零滞后；
+   * 静止（speed<0.5）返回 null。用本地 ENU 框架把标量速度转到地心坐标系。
+   */
+  private buildVelocity(target: Cartesian3, d: DroneBrief, result: Cartesian3 | null): Cartesian3 | null {
+    if (d.speed < 0.5) return null
+    const speedMs = d.speed / 1000
+    const headingRad = CesiumMath.toRadians(d.heading)
+    const east = Math.sin(headingRad) * speedMs
+    const north = Math.cos(headingRad) * speedMs
+    const enu = Transforms.eastNorthUpToFixedFrame(target, Ellipsoid.WGS84, this.transformScratch)
+    const basis = Matrix4.getMatrix3(enu, this.matrix3Scratch)
+    Matrix3.getColumn(basis, 0, this.eastAxis)
+    Matrix3.getColumn(basis, 1, this.northAxis)
+    Cartesian3.multiplyByScalar(this.eastAxis, east, this.eastAxis)
+    Cartesian3.multiplyByScalar(this.northAxis, north, this.northAxis)
+    const velocity = result ?? new Cartesian3()
+    Cartesian3.add(this.eastAxis, this.northAxis, velocity)
+    return velocity
   }
 
   /** 基站标记（只建一次） */
@@ -348,6 +384,7 @@ export class FleetScene {
       this.following = false
       this.followOffset = null
     }
+    this.scheduleLoop()
   }
 
   /** 取消选中：清路线、切回机队总览 */
@@ -426,6 +463,7 @@ export class FleetScene {
             : DRONE_SCALE
       item.billboard.color = dimmed ? STATUS_COLOR_DIM[item.status] : STATUS_COLOR_OBJ[item.status]
     }
+    this.viewer.scene.requestRender()
   }
 
   private clearRoute(): void {
@@ -433,16 +471,32 @@ export class FleetScene {
     this.routeEntities = []
   }
 
-  /** 每帧：快照间插值推位置与航向；跟随时相机 lookAt 选中机的 Billboard 位置 */
+  private scheduleLoop(): void {
+    if (this.rafId !== 0) return
+    this.rafId = requestAnimationFrame(this.loop)
+  }
+
+  /** 每帧：纯匀速外推——每帧位置 = 快照点 + 速度×经过时间，无修正拖拽，速度恒定 */
   private loop = (): void => {
+    this.rafId = 0
     const now = performance.now()
+    let hasMovingDrone = false
     for (const item of this.items.values()) {
-      const t = Math.min(1, (now - item.start) / INTERP_MS)
-      const eased = t * t * (3 - 2 * t)
-      Cartesian3.lerp(item.from, item.to, eased, item.scratch)
-      item.billboard.position = item.scratch
-      item.headingCurrent = item.headingFrom + shortestDelta(item.headingFrom, item.headingTo) * eased
-      item.billboard.rotation = -CesiumMath.toRadians(item.headingCurrent)
+      const sinceSnap = now - item.lastSnapAt
+      if (item.velocity) {
+        if (sinceSnap < EXTRA_CLAMP_MS) {
+          // 纯匀速外推：从最新快照点按速度直线前进，不再做修正 lerp（修正会造成"拖拽→加速"的卡顿感）
+          Cartesian3.multiplyByScalar(item.velocity, sinceSnap, this.extrapolateScratch)
+          Cartesian3.add(item.to, this.extrapolateScratch, item.scratch)
+          item.billboard.position = item.scratch
+          hasMovingDrone = true
+        } else {
+          // 快照中断超时后停在最后位置，不继续外推。
+          Cartesian3.clone(item.to, item.scratch)
+          item.billboard.position = item.scratch
+          item.velocity = null
+        }
+      }
     }
 
     if (this.following && this.selectedId && this.followOffset) {
@@ -453,16 +507,11 @@ export class FleetScene {
       }
     }
 
-    this.rafId = requestAnimationFrame(this.loop)
+    if (hasMovingDrone || (this.following && this.selectedId)) {
+      this.viewer.scene.requestRender()
+    }
+    if (hasMovingDrone) this.scheduleLoop()
   }
-}
-
-/** 航向角最短路径（避免 350° → 10° 绕远路） */
-function shortestDelta(from: number, to: number): number {
-  let d = (to - from) % 360
-  if (d > 180) d -= 360
-  if (d < -180) d += 360
-  return d
 }
 
 /**

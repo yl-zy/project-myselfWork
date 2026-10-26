@@ -37,11 +37,24 @@ export function clearAuth(): void {
   localStorage.removeItem(USER_KEY)
 }
 
+/** 生成匿名访客 UUID：优先 crypto.randomUUID，降级到 getRandomValues（兼容非 HTTPS 环境） */
+function genVisitorId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 /** 性能监控用的匿名访客标识：首次访问生成，持久不变 */
 export function getVisitorId(): string {
   let id = localStorage.getItem(VISITOR_KEY)
   if (!id) {
-    id = crypto.randomUUID()
+    id = genVisitorId()
     localStorage.setItem(VISITOR_KEY, id)
   }
   return id

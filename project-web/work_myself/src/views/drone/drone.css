@@ -21,10 +21,27 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   color: var(--text-muted);
   font-size: 15px;
   letter-spacing: 0.2em;
   pointer-events: none;
+  z-index: 5;
+}
+
+.loading-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(34, 211, 238, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ---- 顶部栏 ---- */
@@ -279,11 +296,15 @@
   top: 88px;
   left: 24px;
   width: 300px;
-  max-height: calc(100vh - 120px);
+  height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
   gap: 14px;
   z-index: 10;
+}
+
+.side-panel > .panel:first-child {
+  flex: none;
 }
 
 .list-panel {
@@ -362,26 +383,36 @@
 
 .drone-list {
   flex: 1;
-  min-height: 120px;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
+  padding-bottom: 4px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .drone-list::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
 }
 
 .drone-list::-webkit-scrollbar-thumb {
-  background: rgba(34, 211, 238, 0.25);
-  border-radius: 2px;
+  background: rgba(34, 211, 238, 0.32);
+  border-radius: 3px;
+}
+
+.drone-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 211, 238, 0.55);
 }
 
 .drone-item {
+  width: 100%;
   padding: 8px 10px;
   text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
   border: 1px solid var(--border-subtle);
   border-radius: 5px;
   background: rgba(2, 6, 23, 0.3);
@@ -441,6 +472,20 @@
   height: 100%;
   border-radius: 1px;
   transition: width 0.3s linear;
+}
+
+/* 清单内 mini 进度条改用电量语义：绿/黄/红渐变透光 */
+.mini-fill.battery-high {
+  background: linear-gradient(90deg, #22d3ee, #34d399);
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+}
+
+.mini-fill.battery-mid {
+  background: linear-gradient(90deg, #22d3ee, #fbbf24);
+}
+
+.mini-fill.battery-low {
+  background: linear-gradient(90deg, #fbbf24, #f87171);
 }
 
 .list-empty {
@@ -765,10 +810,9 @@
   height: 150px;
 }
 
-/* 选中单机时：详情面板占据右侧，统计面板临时移往左下，避免重叠 */
-.drone-page:has(.detail-panel) .stats-panel {
-  right: auto;
-  left: 24px;
+/* 选中单机时隐藏数据统计面板：右侧让位给详情面板，避免两者重叠（由模板绑定 .stats-hidden 控制） */
+.stats-panel.stats-hidden {
+  display: none;
 }
 
 /* ---- 悬浮提示 ---- */
@@ -901,7 +945,7 @@
     left: 12px;
     top: 82px;
     width: 220px;
-    max-height: calc(100vh - 150px);
+    height: calc(100vh - 150px);
   }
 
   .detail-panel {
@@ -914,11 +958,6 @@
     right: 12px;
     left: auto;
     width: 260px;
-  }
-
-  .drone-page:has(.detail-panel) .stats-panel {
-    right: 12px;
-    left: auto;
   }
 
   .page-sub {
@@ -953,13 +992,6 @@
 
   .stats-panel .chart-box {
     height: 120px;
-  }
-
-  .drone-page:has(.detail-panel) .stats-panel {
-    left: 12px;
-    right: 12px;
-    top: 200px;
-    bottom: auto;
   }
 
   .stat-strip {

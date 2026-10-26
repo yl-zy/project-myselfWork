@@ -49,7 +49,10 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
 <template>
   <div class="drone-page">
     <div ref="cesiumEl" class="cesium-container" />
-    <div v-if="loading" class="scene-loading">机队数据接入中…</div>
+    <div v-if="loading" class="scene-loading">
+      <span class="loading-spinner" />
+      <span>机队数据接入中…</span>
+    </div>
 
     <!-- 顶部栏：标题 + 连接状态 + 全局操作 -->
     <header class="top-bar">
@@ -166,7 +169,8 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
             <div class="mini-track">
               <div
                 class="mini-fill"
-                :style="{ width: progressPercent(d.progress), background: STATUS_META[d.status].color }"
+                :class="`battery-${batteryLevel(d.battery)}`"
+                :style="{ width: `${d.battery}%` }"
               />
             </div>
           </button>
@@ -276,7 +280,7 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
     </aside>
 
     <!-- 数据统计面板：六态分布 + 电量分布，随 2s 快照实时更新 -->
-    <aside class="panel stats-panel">
+    <aside class="panel stats-panel" :class="{ 'stats-hidden': selectedId }">
       <h3 class="panel-title"><span class="panel-mark violet" />数据统计</h3>
 
       <div class="stats-kpi">
