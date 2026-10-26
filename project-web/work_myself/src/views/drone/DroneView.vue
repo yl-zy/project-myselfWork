@@ -1,139 +1,293 @@
 <script setup lang="ts">
-import { useTemplateRef } from 'vue'
-import { useDroneScreen } from './drone'
+import { computed, useTemplateRef } from 'vue'
+import { STATUS_META, STATUS_ORDER, useDroneScreen } from './drone'
 import './drone.css'
 
 const cesiumEl = useTemplateRef<HTMLElement>('cesiumEl')
 
 const {
   loading,
-  routes,
-  currentRouteId,
-  currentRoute,
-  state,
-  stateText,
-  telemetry,
-  speed,
-  cameraMode,
-  progressPercent,
-  SPEED_OPTIONS,
+  live,
+  connected,
+  stats,
+  baseName,
+  statusFilter,
+  keyword,
+  statusCounts,
+  activeCount,
+  filteredDrones,
+  selectedId,
+  selectedBrief,
+  detail,
+  follow,
+  hoverInfo,
+  hoveredDrone,
+  updatedText,
+  fmtBattery,
   fmtDistance,
-  fmtEta,
-  routeLength,
-  selectRoute,
-  start,
-  pauseOrResume,
-  reset,
-  setSpeed,
-  toggleCamera,
+  fmtDuration,
+  progressPercent,
+  batteryLevel,
+  selectDrone,
+  clearSelection,
+  backToOverview,
+  toggleFollow,
+  setStatusFilter,
+  toggleLive,
 } = useDroneScreen(cesiumEl)
+
+const selectedBattery = computed(() => selectedBrief.value?.battery ?? 0)
 </script>
 
 <template>
   <div class="drone-page">
     <div ref="cesiumEl" class="cesium-container" />
-    <div v-if="loading" class="scene-loading">三维场景加载中…</div>
+    <div v-if="loading" class="scene-loading">机队数据接入中…</div>
 
-    <!-- 顶部栏 -->
+    <!-- 顶部栏：标题 + 连接状态 + 全局操作 -->
     <header class="top-bar">
       <router-link class="back-link" to="/">← 门户</router-link>
       <div class="title-wrap">
-        <h1 class="page-title">无人机三维巡检</h1>
-        <p class="page-sub">UAV 3D INSPECTION · NANJING</p>
+        <h1 class="page-title">物流无人机机队监控</h1>
+        <p class="page-sub">UAV LOGISTICS FLEET · NANJING</p>
       </div>
       <div class="top-right">
-        <span class="state-badge" :class="`state-${state}`">{{ stateText }}</span>
-        <button class="ctrl-btn" type="button" @click="toggleCamera">
-          {{ cameraMode === 'follow' ? '跟随视角' : '自由视角' }}
+        <span class="conn-badge" :class="connected ? 'ok' : 'bad'">
+          {{ connected ? '实时接入' : '连接中断' }}
+        </span>
+        <span class="clock">快照 {{ updatedText }}</span>
+        <button class="ctrl-btn" type="button" :class="{ paused: !live }" @click="toggleLive">
+          {{ live ? '暂停刷新' : '恢复刷新' }}
         </button>
+        <button class="ctrl-btn" type="button" @click="backToOverview">机队总览</button>
       </div>
     </header>
 
-    <!-- 左侧：航线选择 + 飞行控制 -->
-    <aside class="side-panel">
+    <!-- 顶部统计条 -->
+    <section class="stat-strip">
+      <div class="stat">
+        <p class="stat-num">{{ stats?.total ?? 0 }}</p>
+        <p class="stat-label">机队总数</p>
+      </div>
+      <div class="stat">
+        <p class="stat-num accent">{{ activeCount }}</p>
+        <p class="stat-label">空中作业</p>
+      </div>
+      <div class="stat">
+        <p class="stat-num">{{ statusCounts.standby }}</p>
+        <p class="stat-label">待命</p>
+      </div>
+      <div class="stat">
+        <p class="stat-num success">{{ statusCounts.charging }}</p>
+        <p class="stat-label">充电</p>
+      </div>
+      <div class="stat">
+        <p class="stat-num">{{ stats?.active_orders ?? 0 }}</p>
+        <p class="stat-label">在途订单</p>
+      </div>
+      <div class="stat">
+        <p class="stat-num success">{{ stats?.completed_orders ?? 0 }}</p>
+        <p class="stat-label">累计完成</p>
+      </div>
+      <div class="stat stat-wide">
+        <p class="stat-num">{{ stats ? `${stats.avg_battery.toFixed(1)}%` : '--' }}</p>
+        <p class="stat-label">平均电量</p>
+      </div>
+      <div class="stat stat-wide">
+        <p class="stat-num base-name">{{ baseName }}</p>
+        <p class="stat-label">物流基站</p>
+      </div>
+    </section>
+
+    <!-- 左侧：状态筛选 + 机队清单 -->
+    <aside class="side-panel left-panel">
       <section class="panel">
-        <h3 class="panel-title"><span class="panel-mark" />巡检航线</h3>
-        <div
-          v-for="route in routes"
-          :key="route.id"
-          class="route-item"
-          :class="{ active: route.id === currentRouteId, locked: state === 'flying' }"
-          @click="selectRoute(route.id)"
-        >
-          <p class="route-name">{{ route.name }}</p>
-          <p class="route-meta">
-            {{ route.points.length }} 个途经点 · {{ fmtDistance(routeLength(route)) }}
-          </p>
+        <h3 class="panel-title"><span class="panel-mark" />机队状态</h3>
+        <div class="filter-row">
+          <button
+            class="filter-chip"
+            :class="{ active: statusFilter === 'all' }"
+            type="button"
+            @click="setStatusFilter('all')"
+          >
+            全部<em>{{ stats?.total ?? 0 }}</em>
+          </button>
+          <button
+            v-for="s in STATUS_ORDER"
+            :key="s"
+            class="filter-chip"
+            :class="{ active: statusFilter === s }"
+            type="button"
+            @click="setStatusFilter(s)"
+          >
+            <span class="dot" :style="{ background: STATUS_META[s].color }" />
+            {{ STATUS_META[s].label }}<em>{{ statusCounts[s] }}</em>
+          </button>
         </div>
       </section>
 
-      <section class="panel">
-        <h3 class="panel-title"><span class="panel-mark violet" />飞行控制</h3>
-        <div class="ctrl-row">
+      <section class="panel list-panel">
+        <h3 class="panel-title">
+          <span class="panel-mark violet" />机队清单
+          <em class="panel-count">{{ filteredDrones.length }}</em>
+        </h3>
+        <input
+          v-model="keyword"
+          class="search-input"
+          type="search"
+          placeholder="搜索编号 / 订单号 / 站点"
+        />
+        <div class="drone-list">
           <button
-            class="ctrl-btn primary"
+            v-for="d in filteredDrones"
+            :key="d.id"
+            class="drone-item"
+            :class="{ selected: d.id === selectedId }"
             type="button"
-            :disabled="!currentRoute || state === 'flying'"
-            @click="start"
+            @click="selectDrone(d.id)"
           >
-            {{ state === 'paused' ? '继续' : state === 'done' ? '再次巡检' : '开始巡检' }}
+            <div class="drone-line">
+              <span class="drone-id">{{ d.id }}</span>
+              <span class="drone-status" :style="{ color: STATUS_META[d.status].color }">
+                {{ STATUS_META[d.status].label }}
+              </span>
+            </div>
+            <div class="drone-meta">
+              <span>{{ fmtBattery(d.battery) }}</span>
+              <span class="mono">{{ d.order_id ?? '未派单' }}</span>
+            </div>
+            <div class="mini-track">
+              <div
+                class="mini-fill"
+                :style="{ width: progressPercent(d.progress), background: STATUS_META[d.status].color }"
+              />
+            </div>
           </button>
-          <button
-            class="ctrl-btn"
-            type="button"
-            :disabled="state !== 'flying' && state !== 'paused'"
-            @click="pauseOrResume"
-          >
-            {{ state === 'paused' ? '已暂停' : '暂停' }}
-          </button>
-          <button class="ctrl-btn danger" type="button" :disabled="state === 'idle'" @click="reset">
-            重置
-          </button>
-        </div>
-        <p class="ctrl-label">巡航速度</p>
-        <div class="speed-row">
-          <button
-            v-for="opt in SPEED_OPTIONS"
-            :key="opt.value"
-            class="speed-btn"
-            :class="{ active: speed === opt.value }"
-            type="button"
-            @click="setSpeed(opt.value)"
-          >
-            {{ opt.label }}
-          </button>
+          <p v-if="filteredDrones.length === 0" class="list-empty">没有匹配的无人机</p>
         </div>
       </section>
     </aside>
 
-    <!-- 底部遥测条 -->
-    <footer class="telemetry-bar">
-      <div class="tele-item">
-        <p class="tele-num">{{ telemetry.speed }}<em>m/s</em></p>
-        <p class="tele-label">地速</p>
-      </div>
-      <div class="tele-item">
-        <p class="tele-num">{{ telemetry.altitude }}<em>m</em></p>
-        <p class="tele-label">海拔</p>
-      </div>
-      <div class="tele-item">
-        <p class="tele-num">{{ fmtDistance(telemetry.flown) }}</p>
-        <p class="tele-label">已飞里程</p>
-      </div>
-      <div class="tele-item">
-        <p class="tele-num">{{ telemetry.waypointIndex }}/{{ telemetry.waypointCount }}</p>
-        <p class="tele-label">途经点</p>
-      </div>
-      <div class="tele-item">
-        <p class="tele-num">{{ fmtEta(telemetry.eta) }}</p>
-        <p class="tele-label">预计剩余</p>
-      </div>
-      <div class="progress-wrap">
-        <div class="progress-track">
-          <div class="progress-fill" :style="{ width: progressPercent }" />
+    <!-- 右侧：选中机详情 -->
+    <aside v-if="selectedId" class="panel detail-panel">
+      <header class="detail-head">
+        <div>
+          <p class="detail-id">{{ selectedId }}</p>
+          <p class="detail-sub">
+            {{ detail?.model ?? '天羚 TL-200' }} · {{ detail?.sn ?? '档案加载中' }}
+          </p>
         </div>
-        <p class="progress-text">{{ progressPercent }}</p>
+        <button class="close-btn" type="button" aria-label="取消选中" @click="clearSelection">
+          ×
+        </button>
+      </header>
+
+      <span
+        v-if="selectedBrief"
+        class="status-badge"
+        :style="{
+          color: STATUS_META[selectedBrief.status].color,
+          borderColor: STATUS_META[selectedBrief.status].color,
+        }"
+      >
+        {{ STATUS_META[selectedBrief.status].label }}
+      </span>
+
+      <div class="battery-block">
+        <div class="battery-head">
+          <span>电量</span>
+          <b :class="`battery-${batteryLevel(selectedBattery)}`">{{ fmtBattery(selectedBattery) }}</b>
+        </div>
+        <div class="battery-track">
+          <div
+            class="battery-fill"
+            :class="`battery-${batteryLevel(selectedBattery)}`"
+            :style="{ width: `${selectedBattery}%` }"
+          />
+        </div>
       </div>
+
+      <div class="metric-grid">
+        <div class="metric">
+          <p class="metric-num">{{ selectedBrief?.alt ?? 0 }}<em>m</em></p>
+          <p class="metric-label">当前高度</p>
+        </div>
+        <div class="metric">
+          <p class="metric-num">{{ (selectedBrief?.speed ?? 0).toFixed(1) }}<em>m/s</em></p>
+          <p class="metric-label">地速</p>
+        </div>
+        <div class="metric">
+          <p class="metric-num">{{ detail?.cruise_speed ?? '--' }}<em>m/s</em></p>
+          <p class="metric-label">巡航速度</p>
+        </div>
+        <div class="metric">
+          <p class="metric-num">{{ detail?.cruise_alt ?? '--' }}<em>m</em></p>
+          <p class="metric-label">巡航高度</p>
+        </div>
+        <div class="metric">
+          <p class="metric-num">{{ selectedBrief?.completed_orders ?? 0 }}</p>
+          <p class="metric-label">已完成订单</p>
+        </div>
+        <div class="metric">
+          <p class="metric-num">{{ fmtDuration(selectedBrief?.flight_time ?? 0) }}</p>
+          <p class="metric-label">本单飞行</p>
+        </div>
+      </div>
+
+      <section v-if="selectedBrief?.order_id" class="task-block">
+        <div class="task-row">
+          <span class="task-label">当前订单</span>
+          <span class="mono">{{ selectedBrief.order_id }}</span>
+        </div>
+        <div class="task-row">
+          <span class="task-label">配送站</span>
+          <span>
+            {{ selectedBrief.station?.name ?? '--' }}<em class="mono">{{ selectedBrief.station?.code }}</em>
+          </span>
+        </div>
+        <div class="task-row">
+          <span class="task-label">往返里程</span>
+          <span>{{ detail?.route ? fmtDistance(detail.route.trip_total) : '--' }}</span>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-track">
+            <div class="progress-fill" :style="{ width: progressPercent(selectedBrief.progress) }" />
+          </div>
+          <p class="progress-text">{{ progressPercent(selectedBrief.progress) }}</p>
+        </div>
+      </section>
+      <p v-else class="task-idle">
+        当前无在途任务，该机处于{{ selectedBrief ? STATUS_META[selectedBrief.status].label : '空闲' }}状态
+      </p>
+
+      <div class="detail-actions">
+        <button class="ctrl-btn" :class="{ paused: follow }" type="button" @click="toggleFollow">
+          {{ follow ? '退出跟随' : '跟随视角' }}
+        </button>
+        <button class="ctrl-btn" type="button" @click="clearSelection">取消选中</button>
+      </div>
+    </aside>
+
+    <!-- 鼠标悬浮提示：跟随光标 -->
+    <div
+      v-if="hoverInfo && hoveredDrone"
+      class="hover-tip"
+      :style="{ left: `${hoverInfo.x}px`, top: `${hoverInfo.y}px` }"
+    >
+      <p class="tip-head">
+        <b>{{ hoveredDrone.id }}</b>
+        <span :style="{ color: STATUS_META[hoveredDrone.status].color }">
+          {{ STATUS_META[hoveredDrone.status].label }}
+        </span>
+      </p>
+      <p class="tip-line">电量 {{ fmtBattery(hoveredDrone.battery) }}</p>
+      <p class="tip-line mono">{{ hoveredDrone.order_id ?? '未派单' }}</p>
+    </div>
+
+    <!-- 底部提示 -->
+    <footer class="footer-tip">
+      <span class="live-dot" :class="{ paused: !live }" />
+      数据为模拟演示 · 每 2 秒刷新 · 点击任意无人机查看单机详情
     </footer>
   </div>
 </template>

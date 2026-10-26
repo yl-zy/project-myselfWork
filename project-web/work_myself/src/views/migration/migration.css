@@ -260,7 +260,7 @@
   inset: 0 0 108px 0;
 }
 
-.map-container :deep(.ol-viewport) {
+.map-container .ol-viewport {
   background: transparent;
 }
 

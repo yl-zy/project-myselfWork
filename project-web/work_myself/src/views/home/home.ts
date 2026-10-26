@@ -24,10 +24,10 @@ export const moduleCards: ModuleCard[] = [
   {
     key: 'drone',
     path: '/drone',
-    title: '无人机三维巡检',
-    subtitle: 'UAV 3D',
-    desc: 'Cesium 南京城区三维场景，预置航线自动巡航与飞行状态实时推演',
-    tags: ['Cesium', '三维可视化', 'WebGL'],
+    title: '物流无人机机队',
+    subtitle: 'UAV FLEET',
+    desc: 'Cesium 南京城区三维场景，200 架物流无人机实时模拟：状态机推演、2 秒快照刷新、点选查看单机航线与遥测',
+    tags: ['Cesium', '三维可视化', '实时刷新'],
   },
   {
     key: 'chat',

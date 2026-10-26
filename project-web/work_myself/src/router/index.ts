@@ -27,7 +27,7 @@ const router = createRouter({
       path: '/drone',
       name: 'drone',
       component: () => import('@/views/drone/DroneView.vue'),
-      meta: { title: '无人机三维巡检' },
+      meta: { title: '物流无人机机队监控' },
     },
     {
       path: '/chat',

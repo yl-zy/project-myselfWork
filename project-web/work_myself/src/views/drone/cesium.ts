@@ -1,100 +1,127 @@
 import {
+  BillboardCollection,
   BoundingSphere,
   CallbackPositionProperty,
   CallbackProperty,
+  Cartesian2,
   Cartesian3,
   Color,
   HeadingPitchRange,
   HeadingPitchRoll,
+  HorizontalOrigin,
   ImageryLayer,
   Math as CesiumMath,
+  NearFarScalar,
   PolylineDashMaterialProperty,
+  ScreenSpaceEventHandler,
+  ScreenSpaceEventType,
   Transforms,
   UrlTemplateImageryProvider,
+  VerticalOrigin,
   Viewer,
+  type Billboard,
   type Entity,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import type { FlightRoute } from '@/api/flight'
+import type { DroneBrief, DroneRoute, DroneStation, DroneStatus } from '@/api/drone'
 
-export type FlightState = 'idle' | 'flying' | 'paused' | 'done'
-export type CameraMode = 'follow' | 'free'
-
-export interface Telemetry {
-  /** 当前速度 m/s */
-  speed: number
-  /** 当前海拔 m */
-  altitude: number
-  /** 已飞距离 m */
-  flown: number
-  /** 航线总里程 m */
-  total: number
-  /** 0-1 进度 */
-  progress: number
-  /** 当前航段目标途经点序号（1 起） */
-  waypointIndex: number
-  waypointCount: number
-  /** 预计剩余秒数 */
-  eta: number
+/** 状态配色：三维场景、图例、详情面板共用一套（与深色科技风主题一致） */
+export const STATUS_COLOR: Record<DroneStatus, string> = {
+  standby: '#94a3b8',
+  takeoff: '#fbbf24',
+  delivering: '#22d3ee',
+  landing: '#f472b6',
+  returning: '#818cf8',
+  charging: '#34d399',
 }
 
-export interface DroneSceneCallbacks {
-  onTelemetry: (t: Telemetry) => void
-  onStateChange: (s: FlightState) => void
+const STATUS_COLOR_OBJ: Record<DroneStatus, Color> = {
+  standby: Color.fromCssColorString(STATUS_COLOR.standby),
+  takeoff: Color.fromCssColorString(STATUS_COLOR.takeoff),
+  delivering: Color.fromCssColorString(STATUS_COLOR.delivering),
+  landing: Color.fromCssColorString(STATUS_COLOR.landing),
+  returning: Color.fromCssColorString(STATUS_COLOR.returning),
+  charging: Color.fromCssColorString(STATUS_COLOR.charging),
+}
+
+/** 被筛选压暗时的颜色（保留形状、去掉亮度） */
+const STATUS_COLOR_DIM: Record<DroneStatus, Color> = {
+  standby: STATUS_COLOR_OBJ.standby.withAlpha(0.16),
+  takeoff: STATUS_COLOR_OBJ.takeoff.withAlpha(0.16),
+  delivering: STATUS_COLOR_OBJ.delivering.withAlpha(0.16),
+  landing: STATUS_COLOR_OBJ.landing.withAlpha(0.16),
+  returning: STATUS_COLOR_OBJ.returning.withAlpha(0.16),
+  charging: STATUS_COLOR_OBJ.charging.withAlpha(0.16),
 }
 
 const MODEL_URI = '/drone.glb'
-/** glb 模型前向为 +X（东），heading 从正北顺时针，需 -90° 修正机头朝向 */
-const MODEL_HEADING_OFFSET = -CesiumMath.PI / 2
-/** 已飞轨迹按水平间距采点的阈值（米） */
-const TRAIL_POINT_STEP = 6
-const TELEMETRY_INTERVAL = 100
+/** glb 模型前向为 +X（东），heading 自正北顺时针，需 -90° 修正机头朝向 */
+const MODEL_HEADING_OFFSET = -Math.PI / 2
+const DRONE_SCALE = 0.62
+const DRONE_SCALE_SELECTED = 1.15
+const DRONE_SCALE_HOVER = 0.95
+const DRONE_SCALE_DIM = 0.3
+/** 两次快照之间的插值时长（略小于 2s 轮询间隔，视觉连续） */
+const INTERP_MS = 1800
+const HOVER_PICK_INTERVAL = 70
 
-interface Segment {
+export interface FleetSceneCallbacks {
+  /** 点选某架无人机 */
+  onSelect: (id: string) => void
+  /** 鼠标悬浮：id 为 null 表示移出；x/y 为画布内坐标（用于浮动提示定位） */
+  onHover: (id: string | null, x: number, y: number) => void
+}
+
+interface DroneItem {
+  id: string
+  status: DroneStatus
+  billboard: Billboard
+  /** 插值起止位置（ECEF）与起始时刻 */
   from: Cartesian3
   to: Cartesian3
-  length: number
-  /** 航段起终点经纬度（度），用于精确计算地理航向角 */
-  fromLL: [number, number]
-  toLL: [number, number]
+  start: number
+  /** 航向插值（度，顺时针自正北） */
+  headingFrom: number
+  headingTo: number
+  headingCurrent: number
+  /** 每帧复用的位置对象，避免 GC 抖动 */
+  scratch: Cartesian3
 }
 
 /**
- * 无人机三维巡检场景封装：
- * 高德影像底图（调暗出科技风）+ 航线预显 + 手动 RAF 插值巡航（暂停/变速可精确控制）
+ * 物流机队三维场景封装：
+ * 高德影像底图调暗出科技风 + BillboardCollection 渲染 200 架无人机（按状态着色、按航向旋转）
+ * + 快照间线性插值实现连续飞行 + 点选后绘制往返航线并跟进单机模型。
+ * 类比前端：相当于一个 Three.js 渲染器 + 共享状态，页面只负责往里灌快照数据。
  */
-export class DroneScene {
+export class FleetScene {
   private readonly viewer: Viewer
-  private readonly cb: DroneSceneCallbacks
+  private readonly cb: FleetSceneCallbacks
+  private readonly billboards: BillboardCollection
+  private readonly handler: ScreenSpaceEventHandler
+  private readonly glyph: HTMLCanvasElement
 
-  private route: FlightRoute | null = null
-  private segments: Segment[] = []
-  private totalLength = 0
-
-  private state: FlightState = 'idle'
-  private cameraMode: CameraMode = 'follow'
-  private speed = 80
-
-  private segIndex = 0
-  private segOffset = 0 // 当前航段内已飞距离
-  private currentPos = Cartesian3.ZERO
-  private currentQuat = Transforms.headingPitchRollQuaternion(
-    Cartesian3.ZERO,
-    new HeadingPitchRoll(),
-  )
-  private trailPositions: Cartesian3[] = []
-  private lastTrailPoint: Cartesian3 | null = null
-
-  private droneEntity: Entity | null = null
+  private readonly items = new Map<string, DroneItem>()
+  private readonly stations = new Map<string, Entity>()
+  private baseEntity: Entity | null = null
+  private modelEntity: Entity | null = null
   private routeEntities: Entity[] = []
 
-  private rafId = 0
-  private lastFrame = 0
-  private lastTelemetry = 0
+  private selectedId: string | null = null
+  private hoveredId: string | null = null
+  private filter: DroneStatus | null = null
 
-  private constructor(target: HTMLElement, callbacks: DroneSceneCallbacks) {
+  private selectedPos = Cartesian3.ZERO
+  private selectedQuat = Transforms.headingPitchRollQuaternion(Cartesian3.ZERO, new HeadingPitchRoll())
+
+  private rafId = 0
+  private lastPick = 0
+
+  private constructor(target: HTMLElement, callbacks: FleetSceneCallbacks) {
     this.cb = callbacks
-    // 高德影像瓦片（免 token，国内可达），调暗调灰出暗黑科技感
+    this.glyph = createDroneGlyph()
+
+    // 高德影像瓦片（免 token、国内可达），调暗调灰出暗黑科技感
     const gaode = new UrlTemplateImageryProvider({
       url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
       subdomains: ['1', '2', '3', '4'],
@@ -120,160 +147,281 @@ export class DroneScene {
     // 未使用 ion 服务，默认 credit 会从 cesium.com 拉 logo（国内加载失败显示裂图），隐藏
     const credit = this.viewer.cesiumWidget.creditContainer as HTMLElement
     credit.style.display = 'none'
-    // 关闭天空盒等，纯黑空间更聚焦场景（这些实体在部分版本中可能缺省）
     if (this.viewer.scene.skyBox) this.viewer.scene.skyBox.show = false
     if (this.viewer.scene.skyAtmosphere) this.viewer.scene.skyAtmosphere.show = false
     if (this.viewer.scene.sun) this.viewer.scene.sun.show = false
     if (this.viewer.scene.moon) this.viewer.scene.moon.show = false
     this.viewer.scene.backgroundColor = Color.fromCssColorString('#070b16')
 
-    this.lastFrame = performance.now()
+    this.billboards = this.viewer.scene.primitives.add(new BillboardCollection())
+    this.handler = new ScreenSpaceEventHandler(this.viewer.scene.canvas)
+    this.bindPointer()
+
     this.loop()
   }
 
-  static create(target: HTMLElement, callbacks: DroneSceneCallbacks): DroneScene {
-    return new DroneScene(target, callbacks)
+  static create(target: HTMLElement, callbacks: FleetSceneCallbacks): FleetScene {
+    return new FleetScene(target, callbacks)
   }
 
-  // ---- 航线 ----
+  // ---- 数据灌入 ----
 
-  /** 载入航线：画虚线预显 + 途经点标记，无人机归位起点，状态回 idle */
-  setRoute(route: FlightRoute): void {
-    this.clearRoute()
-    this.route = route
+  /** 全队快照：增量补齐 billboard，记录插值起止点；新快照到达即从当前位置继续平滑移动 */
+  setFleet(drones: DroneBrief[]): void {
+    const now = performance.now()
+    const seen = new Set<string>()
 
-    const positions = route.points.map((p) => Cartesian3.fromDegrees(p.lng, p.lat, p.altitude))
-    this.segments = []
-    this.totalLength = 0
-    for (let i = 0; i < positions.length - 1; i++) {
-      const length = Cartesian3.distance(positions[i]!, positions[i + 1]!)
-      const a = route.points[i]!
-      const b = route.points[i + 1]!
-      this.segments.push({
-        from: positions[i]!,
-        to: positions[i + 1]!,
-        length,
-        fromLL: [a.lng, a.lat],
-        toLL: [b.lng, b.lat],
-      })
-      this.totalLength += length
+    for (const d of drones) {
+      seen.add(d.id)
+      const target = Cartesian3.fromDegrees(d.lng, d.lat, Math.max(d.alt, 2))
+      let item = this.items.get(d.id)
+      if (!item) {
+        const billboard = this.billboards.add({
+          image: this.glyph,
+          position: Cartesian3.clone(target),
+          scale: DRONE_SCALE,
+          color: STATUS_COLOR_OBJ[d.status],
+          rotation: -CesiumMath.toRadians(d.heading),
+          verticalOrigin: VerticalOrigin.CENTER,
+          horizontalOrigin: HorizontalOrigin.CENTER,
+          scaleByDistance: new NearFarScalar(1500, 1.8, 70000, 0.7),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        })
+        billboard.id = { droneId: d.id }
+        item = {
+          id: d.id,
+          status: d.status,
+          billboard,
+          from: Cartesian3.clone(target),
+          to: target,
+          start: now - INTERP_MS,
+          headingFrom: d.heading,
+          headingTo: d.heading,
+          headingCurrent: d.heading,
+          scratch: Cartesian3.clone(target),
+        }
+        this.items.set(d.id, item)
+      } else {
+        item.from = Cartesian3.clone(item.scratch)
+        item.to = target
+        item.start = now
+        item.headingFrom = item.headingCurrent
+        item.headingTo = d.heading
+        item.status = d.status
+      }
     }
 
-    // 航线虚线
+    for (const [id, item] of this.items) {
+      if (seen.has(id)) continue
+      this.billboards.remove(item.billboard)
+      this.items.delete(id)
+    }
+
+    this.refreshLook()
+  }
+
+  /** 基站标记（只建一次） */
+  setBase(base: { lng: number; lat: number; name: string }): void {
+    if (this.baseEntity) return
+    this.baseEntity = this.viewer.entities.add({
+      position: Cartesian3.fromDegrees(base.lng, base.lat, 0),
+      point: {
+        pixelSize: 14,
+        color: Color.fromCssColorString('#22d3ee'),
+        outlineColor: Color.fromCssColorString('#22d3ee').withAlpha(0.25),
+        outlineWidth: 10,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: base.name,
+        font: '13px "JetBrains Mono", monospace',
+        fillColor: Color.fromCssColorString('#c9d6ea'),
+        showBackground: true,
+        backgroundColor: Color.fromCssColorString('rgba(7,11,22,0.7)'),
+        backgroundPadding: new Cartesian2(10, 6),
+        pixelOffset: new Cartesian2(0, -26),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    })
+  }
+
+  /** 配送站标记：从快照里出现的站点增量补齐，避免重复建实体 */
+  setStations(stations: DroneStation[]): void {
+    for (const s of stations) {
+      if (this.stations.has(s.code)) continue
+      const entity = this.viewer.entities.add({
+        position: Cartesian3.fromDegrees(s.lng, s.lat, 0),
+        point: {
+          pixelSize: 6,
+          color: Color.fromCssColorString('#818cf8').withAlpha(0.55),
+          outlineColor: Color.fromCssColorString('#818cf8').withAlpha(0.2),
+          outlineWidth: 4,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      })
+      this.stations.set(s.code, entity)
+    }
+  }
+
+  // ---- 交互 ----
+
+  /** 筛选态：只高亮目标状态，其余压暗 */
+  setFilter(status: DroneStatus | null): void {
+    this.filter = status
+    this.refreshLook()
+  }
+
+  /** 选中单机：相机飞向该机，等下一条详情返回后由 updateRoute 画航线 */
+  selectDrone(id: string): void {
+    this.selectedId = id
+    this.viewer.trackedEntity = undefined
+    this.ensureModel()
+    this.clearRoute()
+    this.refreshLook()
+
+    const item = this.items.get(id)
+    if (!item) return
+    this.viewer.camera.flyToBoundingSphere(new BoundingSphere(Cartesian3.clone(item.to), 80), {
+      duration: 1.0,
+      offset: new HeadingPitchRange(CesiumMath.toRadians(15), CesiumMath.toRadians(-32), 900),
+    })
+  }
+
+  /** 选中机型的往返路线：基站 → 配送站 → 基站（虚线）+ 目的站高亮 */
+  updateRoute(route: DroneRoute | null): void {
+    this.clearRoute()
+    if (!route || !this.selectedId) return
+    const cruise = 110
+    const base = Cartesian3.fromDegrees(route.base.lng, route.base.lat, cruise)
+    const station = Cartesian3.fromDegrees(route.station.lng, route.station.lat, cruise)
     this.routeEntities.push(
       this.viewer.entities.add({
         polyline: {
-          positions,
-          width: 2.5,
+          positions: [base, station, base],
+          width: 2,
           material: new PolylineDashMaterialProperty({
-            color: Color.fromCssColorString('#22d3ee').withAlpha(0.7),
-            dashLength: 12,
+            color: Color.fromCssColorString('#22d3ee').withAlpha(0.8),
+            dashLength: 14,
           }),
         },
       }),
-    )
-    // 途经点：发光圆点 + 序号
-    route.points.forEach((_, i) => {
-      this.routeEntities.push(
-        this.viewer.entities.add({
-          position: positions[i]!,
-          point: {
-            pixelSize: 9,
-            color: Color.fromCssColorString('#818cf8'),
-            outlineColor: Color.fromCssColorString('#818cf8').withAlpha(0.3),
-            outlineWidth: 6,
-          },
-          label: {
-            text: `${i + 1}`,
-            font: '12px JetBrains Mono, monospace',
-            fillColor: Color.fromCssColorString('#c9d6ea'),
-            pixelOffset: new Cartesian3(0, -18, 0) as never,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-        }),
-      )
-    })
-
-    // 无人机实体（首次创建，之后复用）
-    if (!this.droneEntity) {
-      this.droneEntity = this.viewer.entities.add({
-        position: new CallbackPositionProperty(() => this.currentPos, false),
-        orientation: new CallbackProperty(() => this.currentQuat, false),
-        model: {
-          uri: MODEL_URI,
-          minimumPixelSize: 72,
-          maximumScale: 400,
-          color: Color.WHITE,
-        },
-      })
-      // 已飞轨迹实体：由 Cesium entities 集合持有，无需字段引用
       this.viewer.entities.add({
-        polyline: {
-          positions: new CallbackProperty(() => this.trailPositions, false),
-          width: 4,
-          material: Color.fromCssColorString('#22d3ee').withAlpha(0.85),
+        position: station,
+        point: {
+          pixelSize: 11,
+          color: Color.fromCssColorString('#f472b6'),
+          outlineColor: Color.fromCssColorString('#f472b6').withAlpha(0.3),
+          outlineWidth: 8,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-      })
-    }
-
-    this.resetFlight()
-    this.frameCameraOnRoute(positions)
+        label: {
+          text: `${route.station.code} ${route.station.name}`,
+          font: '12px "JetBrains Mono", monospace',
+          fillColor: Color.fromCssColorString('#f9a8d4'),
+          showBackground: true,
+          backgroundColor: Color.fromCssColorString('rgba(7,11,22,0.7)'),
+          backgroundPadding: new Cartesian2(8, 5),
+          pixelOffset: new Cartesian2(0, -24),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }),
+    )
   }
 
-  // ---- 飞行控制 ----
-
-  start(): void {
-    if (!this.route || this.state === 'flying') return
-    if (this.state === 'done') this.resetFlight()
-    this.setState('flying')
+  /** 跟随机头视角（相机锁定选中机模型） */
+  setFollow(enabled: boolean): void {
+    this.viewer.trackedEntity = enabled && this.selectedId ? this.modelEntity ?? undefined : undefined
   }
 
-  pause(): void {
-    if (this.state === 'flying') this.setState('paused')
+  /** 取消选中：清路线、收模型、回到自由视角 */
+  clearSelection(): void {
+    this.selectedId = null
+    this.viewer.trackedEntity = undefined
+    if (this.modelEntity) this.modelEntity.show = false
+    this.clearRoute()
+    this.refreshLook()
   }
 
-  setSpeed(speed: number): void {
-    this.speed = speed
-  }
-
-  resetFlight(): void {
-    this.segIndex = 0
-    this.segOffset = 0
-    this.trailPositions = []
-    this.lastTrailPoint = null
-    if (this.segments.length > 0) {
-      this.currentPos = Cartesian3.clone(this.segments[0].from)
-      this.updateOrientation()
-      this.trailPositions.push(Cartesian3.clone(this.currentPos))
-    }
-    this.setState('idle')
-    this.emitTelemetry(performance.now(), true)
-  }
-
-  toggleCamera(): void {
-    this.cameraMode = this.cameraMode === 'follow' ? 'free' : 'follow'
-    this.applyCameraMode()
+  /** 机队总览：按当前机群包围球拉远俯瞰 */
+  overview(): void {
+    this.viewer.trackedEntity = undefined
+    const points = [...this.items.values()].map((i) => i.to)
+    if (points.length === 0) return
+    const sphere = BoundingSphere.fromPoints(points)
+    this.viewer.camera.flyToBoundingSphere(sphere, {
+      duration: 1.4,
+      offset: new HeadingPitchRange(0, CesiumMath.toRadians(-52), sphere.radius * 2.4),
+    })
   }
 
   destroy(): void {
     cancelAnimationFrame(this.rafId)
+    this.handler.destroy()
     this.viewer.destroy()
   }
 
   // ---- 内部 ----
 
-  private setState(s: FlightState): void {
-    this.state = s
-    this.cb.onStateChange(s)
-    this.applyCameraMode()
+  private bindPointer(): void {
+    this.handler.setInputAction((movement: ScreenSpaceEventHandler.PositionedEvent) => {
+      const id = this.pickDroneId(movement.position)
+      if (id) this.cb.onSelect(id)
+    }, ScreenSpaceEventType.LEFT_CLICK)
+
+    this.handler.setInputAction((movement: ScreenSpaceEventHandler.MotionEvent) => {
+      const now = performance.now()
+      if (now - this.lastPick < HOVER_PICK_INTERVAL) return
+      this.lastPick = now
+      const id = this.pickDroneId(movement.endPosition)
+      const canvas = this.viewer.scene.canvas
+      canvas.style.cursor = id ? 'pointer' : ''
+      if (id === this.hoveredId) {
+        if (id) this.cb.onHover(id, movement.endPosition.x, movement.endPosition.y)
+        return
+      }
+      this.hoveredId = id
+      this.refreshLook()
+      this.cb.onHover(id, movement.endPosition.x, movement.endPosition.y)
+    }, ScreenSpaceEventType.MOUSE_MOVE)
   }
 
-  private applyCameraMode(): void {
-    if (this.cameraMode === 'follow' && this.droneEntity && this.state !== 'idle') {
-      this.viewer.trackedEntity = this.droneEntity
-    } else {
-      this.viewer.trackedEntity = undefined
+  /** 屏幕坐标拾取无人机 billboard（其余实体忽略） */
+  private pickDroneId(position: Cartesian2): string | null {
+    const picked = this.viewer.scene.pick(position) as { id?: { droneId?: string } } | undefined
+    return picked?.id?.droneId ?? null
+  }
+
+  /** 统一刷新配色与大小：选中 > 悬浮 > 筛选压暗 > 常态 */
+  private refreshLook(): void {
+    for (const item of this.items.values()) {
+      const dimmed = this.filter !== null && item.status !== this.filter
+      const selected = item.id === this.selectedId
+      const hovered = item.id === this.hoveredId
+      item.billboard.scale = selected
+        ? DRONE_SCALE_SELECTED
+        : hovered
+          ? DRONE_SCALE_HOVER
+          : dimmed
+            ? DRONE_SCALE_DIM
+            : DRONE_SCALE
+      item.billboard.color = dimmed ? STATUS_COLOR_DIM[item.status] : STATUS_COLOR_OBJ[item.status]
     }
+  }
+
+  private ensureModel(): void {
+    if (this.modelEntity) {
+      this.modelEntity.show = true
+      return
+    }
+    this.modelEntity = this.viewer.entities.add({
+      position: new CallbackPositionProperty(() => this.selectedPos, false),
+      orientation: new CallbackProperty(() => this.selectedQuat, false),
+      model: {
+        uri: MODEL_URI,
+        minimumPixelSize: 96,
+        maximumScale: 600,
+      },
+    })
   }
 
   private clearRoute(): void {
@@ -281,111 +429,93 @@ export class DroneScene {
     this.routeEntities = []
   }
 
-  /** 航线载入后俯瞰整条航线 */
-  private frameCameraOnRoute(positions: Cartesian3[]): void {
-    if (positions.length === 0) return
-    const sphere = BoundingSphere.fromPoints(positions)
-    this.viewer.camera.flyToBoundingSphere(sphere, {
-      duration: 1.4,
-      offset: new HeadingPitchRange(0, CesiumMath.toRadians(-50), sphere.radius * 2.8),
-    })
-  }
-
+  /** 每帧：快照间插值推位置与航向；选中机的模型跟随插值位置 */
   private loop = (): void => {
     const now = performance.now()
-    const dt = (now - this.lastFrame) / 1000
-    this.lastFrame = now
-    if (this.state === 'flying') this.advance(dt)
-    if (now - this.lastTelemetry >= TELEMETRY_INTERVAL) {
-      this.emitTelemetry(now, false)
+    for (const item of this.items.values()) {
+      const t = Math.min(1, (now - item.start) / INTERP_MS)
+      const eased = t * t * (3 - 2 * t)
+      Cartesian3.lerp(item.from, item.to, eased, item.scratch)
+      item.billboard.position = item.scratch
+      item.headingCurrent = item.headingFrom + shortestDelta(item.headingFrom, item.headingTo) * eased
+      item.billboard.rotation = -CesiumMath.toRadians(item.headingCurrent)
     }
-    this.rafId = requestAnimationFrame(this.loop)
-  }
 
-  /** 按速度沿航段推进，跨段时携带剩余距离 */
-  private advance(dt: number): void {
-    let remaining = this.speed * dt
-    while (remaining > 0 && this.segIndex < this.segments.length) {
-      const seg = this.segments[this.segIndex]
-      const segLeft = seg.length - this.segOffset
-      if (remaining < segLeft) {
-        this.segOffset += remaining
-        remaining = 0
-      } else {
-        remaining -= segLeft
-        this.segIndex++
-        this.segOffset = 0
+    if (this.selectedId) {
+      const item = this.items.get(this.selectedId)
+      if (item) {
+        this.selectedPos = Cartesian3.clone(item.scratch)
+        const hpr = new HeadingPitchRoll(
+          CesiumMath.toRadians(item.headingCurrent) + MODEL_HEADING_OFFSET,
+          0,
+          0,
+        )
+        this.selectedQuat = Transforms.headingPitchRollQuaternion(this.selectedPos, hpr)
       }
     }
 
-    if (this.segIndex >= this.segments.length) {
-      // 到达终点
-      const last = this.segments[this.segments.length - 1]
-      if (last) this.currentPos = Cartesian3.clone(last.to)
-      this.appendTrailPoint(true)
-      this.setState('done')
-      return
-    }
-
-    const seg = this.segments[this.segIndex]
-    const t = seg.length > 0 ? this.segOffset / seg.length : 1
-    Cartesian3.lerp(seg.from, seg.to, t, this.currentPos)
-    this.updateOrientation()
-    this.appendTrailPoint(false)
+    this.rafId = requestAnimationFrame(this.loop)
   }
+}
 
-  private updateOrientation(): void {
-    const seg = this.segments[Math.min(this.segIndex, this.segments.length - 1)]
-    if (!seg) return
-    // 由 ECEF 差分近似航向角（短距离误差可忽略）
-    const dx = seg.to.x - seg.from.x
-    const dy = seg.to.y - seg.from.y
-    const dz = seg.to.z - seg.from.z
-    void dz
-    const heading = Math.atan2(dy, dx) // ECEF 下的粗略方位，配合本地 ENU 旋转足够演示
-    this.currentQuat = Transforms.headingPitchRollQuaternion(
-      this.currentPos,
-      new HeadingPitchRoll(heading + MODEL_HEADING_OFFSET, 0, 0),
-    )
-  }
+/** 航向角最短路径（避免 350° → 10° 绕远路） */
+function shortestDelta(from: number, to: number): number {
+  let d = (to - from) % 360
+  if (d > 180) d -= 360
+  if (d < -180) d += 360
+  return d
+}
 
-  private appendTrailPoint(force: boolean): void {
-    if (
-      force ||
-      !this.lastTrailPoint ||
-      Cartesian3.distance(this.lastTrailPoint, this.currentPos) >= TRAIL_POINT_STEP
-    ) {
-      this.lastTrailPoint = Cartesian3.clone(this.currentPos)
-      // 替换数组引用触发 CallbackProperty 重绘
-      this.trailPositions = [...this.trailPositions, this.lastTrailPoint]
-    } else {
-      // 末端跟随当前位置（不等阈值，视觉更顺滑）
-      const arr = [...this.trailPositions]
-      arr[arr.length - 1] = Cartesian3.clone(this.currentPos)
-      this.trailPositions = arr
-    }
-  }
+/**
+ * 生成无人机图标（白色，最终由 billboard.color 按状态染色）：
+ * 中心发光 + 指向正北的机头三角 + 四旋翼臂。
+ * 用 canvas 现场绘制而非外链图片，部署不依赖额外静态资源。
+ */
+function createDroneGlyph(): HTMLCanvasElement {
+  const size = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return canvas
+  ctx.translate(size / 2, size / 2)
 
-  private emitTelemetry(now: number, force: boolean): void {
-    if (!force && now - this.lastTelemetry < TELEMETRY_INTERVAL) return
-    this.lastTelemetry = now
-    const flown = this.flownDistance()
-    const carto = this.viewer.scene.globe.ellipsoid.cartesianToCartographic(this.currentPos)
-    this.cb.onTelemetry({
-      speed: this.state === 'flying' ? this.speed : 0,
-      altitude: carto ? Math.round(carto.height) : 0,
-      flown: Math.round(flown),
-      total: Math.round(this.totalLength),
-      progress: this.totalLength > 0 ? Math.min(flown / this.totalLength, 1) : 0,
-      waypointIndex: Math.min(this.segIndex + 2, this.route?.points.length ?? 0),
-      waypointCount: this.route?.points.length ?? 0,
-      eta: this.speed > 0 ? Math.max(this.totalLength - flown, 0) / this.speed : 0,
-    })
-  }
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 30)
+  glow.addColorStop(0, 'rgba(255,255,255,0.95)')
+  glow.addColorStop(0.45, 'rgba(255,255,255,0.32)')
+  glow.addColorStop(1, 'rgba(255,255,255,0)')
+  ctx.fillStyle = glow
+  ctx.beginPath()
+  ctx.arc(0, 0, 30, 0, Math.PI * 2)
+  ctx.fill()
 
-  private flownDistance(): number {
-    let d = 0
-    for (let i = 0; i < this.segIndex; i++) d += this.segments[i]?.length ?? 0
-    return d + this.segOffset
+  ctx.fillStyle = 'rgba(255,255,255,0.96)'
+  ctx.beginPath()
+  ctx.moveTo(0, -19)
+  ctx.lineTo(7, -6)
+  ctx.lineTo(-7, -6)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+  ctx.lineWidth = 2.5
+  ctx.beginPath()
+  ctx.moveTo(-11, 9)
+  ctx.lineTo(11, -9)
+  ctx.moveTo(11, 9)
+  ctx.lineTo(-11, -9)
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'
+  for (const [x, y] of [
+    [-12, -11],
+    [12, -11],
+    [-12, 11],
+    [12, 11],
+  ]) {
+    ctx.beginPath()
+    ctx.arc(x!, y!, 3.6, 0, Math.PI * 2)
+    ctx.fill()
   }
+  return canvas
 }

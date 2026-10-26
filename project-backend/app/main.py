@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import api_router
+from app.services.drone_sim import start_drone_tasks
 from app.services.migration_gen import start_migration_tasks
 from app.ws.kanban import router as kanban_ws_router
 
@@ -26,7 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     类比前端：页面 onMounted 起定时器，onUnmounted 清掉。
     """
 
-    tasks = start_migration_tasks()
+    tasks = start_migration_tasks() + start_drone_tasks()
     yield
     for task in tasks:
         task.cancel()

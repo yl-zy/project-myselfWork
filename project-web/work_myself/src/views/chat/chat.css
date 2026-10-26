@@ -541,72 +541,72 @@
 }
 
 /* Markdown 渲染内容（v-html 注入，需 :deep） */
-.msg-markdown :deep(h1),
-.msg-markdown :deep(h2),
-.msg-markdown :deep(h3),
-.msg-markdown :deep(h4) {
+.msg-markdown h1,
+.msg-markdown h2,
+.msg-markdown h3,
+.msg-markdown h4 {
   font-weight: 700;
   line-height: 1.4;
   margin: 16px 0 8px;
   color: var(--text-primary);
 }
 
-.msg-markdown :deep(h1) {
+.msg-markdown h1 {
   font-size: 19px;
 }
 
-.msg-markdown :deep(h2) {
+.msg-markdown h2 {
   font-size: 17px;
 }
 
-.msg-markdown :deep(h3) {
+.msg-markdown h3 {
   font-size: 15px;
 }
 
-.msg-markdown :deep(h4) {
+.msg-markdown h4 {
   font-size: 14px;
 }
 
-.msg-markdown :deep(h1:first-child),
-.msg-markdown :deep(h2:first-child),
-.msg-markdown :deep(h3:first-child),
-.msg-markdown :deep(p:first-child),
-.msg-markdown :deep(ul:first-child),
-.msg-markdown :deep(ol:first-child) {
+.msg-markdown h1:first-child,
+.msg-markdown h2:first-child,
+.msg-markdown h3:first-child,
+.msg-markdown p:first-child,
+.msg-markdown ul:first-child,
+.msg-markdown ol:first-child {
   margin-top: 0;
 }
 
-.msg-markdown :deep(p:last-child),
-.msg-markdown :deep(ul:last-child),
-.msg-markdown :deep(ol:last-child),
-.msg-markdown :deep(pre:last-child) {
+.msg-markdown p:last-child,
+.msg-markdown ul:last-child,
+.msg-markdown ol:last-child,
+.msg-markdown pre:last-child {
   margin-bottom: 0;
 }
 
-.msg-markdown :deep(p) {
+.msg-markdown p {
   margin: 10px 0;
 }
 
-.msg-markdown :deep(ul),
-.msg-markdown :deep(ol) {
+.msg-markdown ul,
+.msg-markdown ol {
   margin: 10px 0;
   padding-left: 22px;
 }
 
-.msg-markdown :deep(li) {
+.msg-markdown li {
   margin: 4px 0;
 }
 
-.msg-markdown :deep(li::marker) {
+.msg-markdown li::marker {
   color: var(--accent);
 }
 
-.msg-markdown :deep(strong) {
+.msg-markdown strong {
   color: var(--accent);
   font-weight: 600;
 }
 
-.msg-markdown :deep(code) {
+.msg-markdown code {
   font-family: var(--font-mono);
   font-size: 12.5px;
   padding: 2px 7px;
@@ -616,7 +616,7 @@
   color: var(--accent);
 }
 
-.msg-markdown :deep(pre) {
+.msg-markdown pre {
   margin: 12px 0;
   padding: 14px 16px;
   border-radius: var(--radius-sm);
@@ -625,7 +625,7 @@
   overflow-x: auto;
 }
 
-.msg-markdown :deep(pre code) {
+.msg-markdown pre code {
   padding: 0;
   background: none;
   border: none;
@@ -634,7 +634,7 @@
   line-height: 1.7;
 }
 
-.msg-markdown :deep(blockquote) {
+.msg-markdown blockquote {
   margin: 10px 0;
   padding: 4px 14px;
   border-left: 3px solid var(--accent-violet);
@@ -643,25 +643,25 @@
   border-radius: 0 6px 6px 0;
 }
 
-.msg-markdown :deep(a) {
+.msg-markdown a {
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
-.msg-markdown :deep(table) {
+.msg-markdown table {
   border-collapse: collapse;
   margin: 12px 0;
   font-size: 13px;
 }
 
-.msg-markdown :deep(th),
-.msg-markdown :deep(td) {
+.msg-markdown th,
+.msg-markdown td {
   border: 1px solid var(--border-subtle);
   padding: 7px 12px;
 }
 
-.msg-markdown :deep(th) {
+.msg-markdown th {
   background: var(--bg-card);
   color: var(--accent);
 }

@@ -1,147 +1,289 @@
 import { computed, onBeforeUnmount, onMounted, ref, type ShallowRef } from 'vue'
-import { getFlightRoutes, type FlightRoute } from '@/api/flight'
+import {
+  getDroneDetail,
+  getDroneSnapshot,
+  type DroneBrief,
+  type DroneDetail,
+  type DroneSnapshot,
+  type DroneStats,
+  type DroneStation,
+  type DroneStatus,
+} from '@/api/drone'
 import { toast } from '@/utils/toast'
-import { DroneScene, type CameraMode, type FlightState, type Telemetry } from './cesium'
+import { FleetScene, STATUS_COLOR } from './cesium'
 
-const SPEED_OPTIONS = [
-  { label: '低速', value: 40 },
-  { label: '标准', value: 80 },
-  { label: '高速', value: 160 },
-]
+/** 快照轮询间隔：后端每秒推演一拍，前端 2s 拉一次（线上带宽约 30KB/s） */
+const POLL_MS = 2000
 
-const STATE_TEXT: Record<FlightState, string> = {
-  idle: '待机',
-  flying: '巡航中',
-  paused: '已暂停',
-  done: '已完成',
+export const STATUS_META: Record<DroneStatus, { label: string; color: string }> = {
+  standby: { label: '待命', color: STATUS_COLOR.standby },
+  takeoff: { label: '起飞中', color: STATUS_COLOR.takeoff },
+  delivering: { label: '配送中', color: STATUS_COLOR.delivering },
+  landing: { label: '降落中', color: STATUS_COLOR.landing },
+  returning: { label: '返航中', color: STATUS_COLOR.returning },
+  charging: { label: '充电中', color: STATUS_COLOR.charging },
 }
 
-/** 无人机三维巡检逻辑：航线加载 + 飞行控制 + 遥测数据桥接 */
+/** 状态展示顺序：图例与筛选项共用 */
+export const STATUS_ORDER: DroneStatus[] = [
+  'delivering',
+  'returning',
+  'takeoff',
+  'landing',
+  'standby',
+  'charging',
+]
+
+export type StatusFilter = DroneStatus | 'all'
+
+/** 物流机队监控逻辑：快照轮询 + 状态筛选 + 点选详情 + 视角跟随 */
 export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>>) {
-  let scene: DroneScene | null = null
+  let scene: FleetScene | null = null
+  let timer = 0
+  let disposed = false
+  let firstFail = true
 
   const loading = ref(true)
-  const routes = ref<FlightRoute[]>([])
-  const currentRouteId = ref<number | null>(null)
-  const state = ref<FlightState>('idle')
-  const speed = ref(80)
-  const cameraMode = ref<CameraMode>('follow')
-  const telemetry = ref<Telemetry>({
-    speed: 0,
-    altitude: 0,
-    flown: 0,
-    total: 0,
-    progress: 0,
-    waypointIndex: 0,
-    waypointCount: 0,
-    eta: 0,
+  const live = ref(true)
+  const connected = ref(true)
+  const snapshot = ref<DroneSnapshot | null>(null)
+  const statusFilter = ref<StatusFilter>('all')
+  const keyword = ref('')
+  const selectedId = ref<string | null>(null)
+  const detail = ref<DroneDetail | null>(null)
+  const follow = ref(false)
+  const hoverInfo = ref<{ id: string; x: number; y: number } | null>(null)
+  const lastUpdated = ref<number | null>(null)
+
+  const stats = computed<DroneStats | null>(() => snapshot.value?.stats ?? null)
+  const drones = computed<DroneBrief[]>(() => snapshot.value?.drones ?? [])
+  const baseName = computed(() => stats.value?.base.name ?? '新街口物流基站')
+
+  const statusCounts = computed<Record<DroneStatus, number>>(() => {
+    const counts: Record<DroneStatus, number> = {
+      standby: 0,
+      takeoff: 0,
+      delivering: 0,
+      landing: 0,
+      returning: 0,
+      charging: 0,
+    }
+    const by = stats.value?.by_status ?? {}
+    for (const s of STATUS_ORDER) counts[s] = by[s] ?? 0
+    return counts
   })
 
-  const stateText = computed(() => STATE_TEXT[state.value])
-  const currentRoute = computed(
-    () => routes.value.find((r) => r.id === currentRouteId.value) ?? null,
+  /** 空中作业数：起飞 + 配送 + 降落 + 返航 */
+  const activeCount = computed(
+    () =>
+      statusCounts.value.takeoff +
+      statusCounts.value.delivering +
+      statusCounts.value.landing +
+      statusCounts.value.returning,
   )
-  const progressPercent = computed(() => `${(telemetry.value.progress * 100).toFixed(1)}%`)
+
+  const filteredDrones = computed<DroneBrief[]>(() => {
+    const kw = keyword.value.trim().toLowerCase()
+    return drones.value.filter((d) => {
+      if (statusFilter.value !== 'all' && d.status !== statusFilter.value) return false
+      if (!kw) return true
+      return (
+        d.id.toLowerCase().includes(kw) ||
+        (d.order_id ?? '').toLowerCase().includes(kw) ||
+        (d.station?.name ?? '').toLowerCase().includes(kw)
+      )
+    })
+  })
+
+  const selectedBrief = computed<DroneBrief | null>(
+    () => drones.value.find((d) => d.id === selectedId.value) ?? null,
+  )
+
+  const hoveredDrone = computed<DroneBrief | null>(() => {
+    const info = hoverInfo.value
+    if (!info) return null
+    return drones.value.find((d) => d.id === info.id) ?? null
+  })
+
+  const updatedText = computed(() =>
+    lastUpdated.value
+      ? new Date(lastUpdated.value * 1000).toLocaleTimeString('zh-CN', { hour12: false })
+      : '--:--:--',
+  )
+
+  // ---- 格式化 ----
+  function fmtBattery(v: number): string {
+    return `${v.toFixed(1)}%`
+  }
 
   function fmtDistance(m: number): string {
     return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`
   }
 
-  function fmtEta(seconds: number): string {
-    const s = Math.ceil(seconds)
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  function fmtDuration(sec: number): string {
+    const s = Math.max(0, Math.round(sec))
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
   }
 
-  /** 航线里程（页面侧与场景侧口径一致，列表展示用） */
-  function routeLength(route: FlightRoute): number {
-    let d = 0
-    for (let i = 0; i < route.points.length - 1; i++) {
-      const a = route.points[i]
-      const b = route.points[i + 1]
-      const dx = (b.lng - a.lng) * 111320 * Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180))
-      const dy = (b.lat - a.lat) * 110540
-      d += Math.hypot(dx, dy)
+  function progressPercent(v: number): string {
+    return `${Math.min(100, Math.max(0, v * 100)).toFixed(0)}%`
+  }
+
+  /** 电量分级：配色用（高绿 / 中黄 / 低红） */
+  function batteryLevel(v: number): 'high' | 'mid' | 'low' {
+    return v >= 60 ? 'high' : v >= 25 ? 'mid' : 'low'
+  }
+
+  // ---- 数据链路 ----
+  function applySnapshot(res: DroneSnapshot): void {
+    snapshot.value = res
+    lastUpdated.value = res.ts
+    connected.value = true
+    loading.value = false
+    scene?.setBase(res.stats.base)
+    scene?.setFleet(res.drones)
+
+    // 站点标记：从快照中出现过的配送站增量补齐
+    const unique: DroneStation[] = []
+    const codes = new Set<string>()
+    for (const d of res.drones) {
+      if (!d.station || codes.has(d.station.code)) continue
+      codes.add(d.station.code)
+      unique.push(d.station)
     }
-    return d
+    scene?.setStations(unique)
   }
 
-  function selectRoute(id: number): void {
-    if (state.value === 'flying') return
-    const route = routes.value.find((r) => r.id === id)
-    if (!route || !scene) return
-    currentRouteId.value = id
-    scene.setRoute(route)
-  }
-
-  function start(): void {
-    scene?.start()
-  }
-
-  function pauseOrResume(): void {
-    if (state.value === 'flying') scene?.pause()
-    else if (state.value === 'paused') scene?.start()
-  }
-
-  function reset(): void {
-    scene?.resetFlight()
-  }
-
-  function setSpeed(v: number): void {
-    speed.value = v
-    scene?.setSpeed(v)
-  }
-
-  function toggleCamera(): void {
-    scene?.toggleCamera()
-    cameraMode.value = cameraMode.value === 'follow' ? 'free' : 'follow'
-  }
-
-  onMounted(async () => {
+  async function pull(): Promise<void> {
+    if (disposed) return
     try {
-      scene = DroneScene.create(cesiumEl.value!, {
-        onTelemetry: (t) => (telemetry.value = t),
-        onStateChange: (s) => (state.value = s),
-      })
-      scene.setSpeed(speed.value)
-      const res = await getFlightRoutes()
-      routes.value = res.routes
-      if (routes.value.length > 0) {
-        const first = routes.value[0]
-        currentRouteId.value = first.id
-        scene.setRoute(first)
+      const res = await getDroneSnapshot()
+      if (disposed) return
+      applySnapshot(res)
+      if (selectedId.value) void refreshDetail()
+    } catch {
+      connected.value = false
+      loading.value = false
+      if (firstFail) {
+        firstFail = false
+        toast.error('机队数据加载失败，请确认后端服务已启动')
       }
+    } finally {
+      if (live.value && !disposed) timer = window.setTimeout(() => void pull(), POLL_MS)
+    }
+  }
+
+  /** 选中机详情：每轮快照同步一次，保证航线与订单状态不滞后 */
+  async function refreshDetail(): Promise<void> {
+    const id = selectedId.value
+    if (!id) return
+    try {
+      const res = await getDroneDetail(id)
+      if (id !== selectedId.value) return
+      detail.value = res
+      scene?.updateRoute(res.route)
+    } catch {
+      // 详情失败不打断主流程，快照仍在刷新
+    }
+  }
+
+  // ---- 交互 ----
+  function selectDrone(id: string): void {
+    selectedId.value = id
+    detail.value = null
+    hoverInfo.value = null
+    follow.value = false
+    scene?.selectDrone(id)
+    void refreshDetail()
+  }
+
+  function clearSelection(): void {
+    selectedId.value = null
+    detail.value = null
+    follow.value = false
+    scene?.clearSelection()
+  }
+
+  function backToOverview(): void {
+    clearSelection()
+    scene?.overview()
+  }
+
+  function toggleFollow(): void {
+    if (!selectedId.value) return
+    follow.value = !follow.value
+    scene?.setFollow(follow.value)
+  }
+
+  function setStatusFilter(v: StatusFilter): void {
+    statusFilter.value = v
+    scene?.setFilter(v === 'all' ? null : v)
+  }
+
+  /** 暂停/恢复轮询：暂停后场景冻结在当前快照，便于讲解演示 */
+  function toggleLive(): void {
+    live.value = !live.value
+    if (live.value) {
+      void pull()
+    } else {
+      window.clearTimeout(timer)
+      timer = 0
+    }
+  }
+
+  onMounted(() => {
+    try {
+      scene = FleetScene.create(cesiumEl.value!, {
+        onSelect: selectDrone,
+        onHover: (id, x, y) => {
+          hoverInfo.value = id ? { id, x, y } : null
+        },
+      })
+      void pull()
     } catch {
       toast.error('三维场景初始化失败，请刷新重试')
-    } finally {
       loading.value = false
     }
   })
 
   onBeforeUnmount(() => {
+    disposed = true
+    window.clearTimeout(timer)
     scene?.destroy()
     scene = null
   })
 
   return {
     loading,
-    routes,
-    currentRouteId,
-    currentRoute,
-    state,
-    stateText,
-    telemetry,
-    speed,
-    cameraMode,
-    progressPercent,
-    SPEED_OPTIONS,
+    live,
+    connected,
+    stats,
+    drones,
+    baseName,
+    statusFilter,
+    keyword,
+    statusCounts,
+    activeCount,
+    filteredDrones,
+    selectedId,
+    selectedBrief,
+    detail,
+    follow,
+    hoverInfo,
+    hoveredDrone,
+    updatedText,
+    STATUS_META,
+    STATUS_ORDER,
+    fmtBattery,
     fmtDistance,
-    fmtEta,
-    routeLength,
-    selectRoute,
-    start,
-    pauseOrResume,
-    reset,
-    setSpeed,
-    toggleCamera,
+    fmtDuration,
+    progressPercent,
+    batteryLevel,
+    selectDrone,
+    clearSelection,
+    backToOverview,
+    toggleFollow,
+    setStatusFilter,
+    toggleLive,
   }
 }

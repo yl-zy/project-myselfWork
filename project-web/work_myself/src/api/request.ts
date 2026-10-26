@@ -3,6 +3,13 @@ import { clearAuth, getToken } from '@/utils/storage'
 import { reportApiDuration } from '@/utils/perf'
 import { toast } from '@/utils/toast'
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    /** 静默请求：失败时不弹全局 toast（轮询类接口用，由页面自行展示连接状态） */
+    silent?: boolean
+  }
+}
+
 /** 后端统一错误体（设计文档 §4）：{ code, message } */
 export interface ApiErrorBody {
   code: string
@@ -67,7 +74,7 @@ request.interceptors.response.use(
         window.location.href = `/login?redirect=${redirect}`
       }
     }
-    toast.error(message)
+    if (!config?.silent) toast.error(message)
     return Promise.reject(new ApiError(code, message, status))
   },
 )
