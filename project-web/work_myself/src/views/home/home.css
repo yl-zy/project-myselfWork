@@ -183,6 +183,24 @@
   line-height: 1.9;
 }
 
+/* ---- hero 署名 ---- */
+.hero-sign {
+  margin-top: 18px;
+  font-size: clamp(13px, 1.4vw, 15px);
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+.hero-sign::before {
+  content: '';
+  display: inline-block;
+  vertical-align: middle;
+  width: 40px;
+  height: 1px;
+  margin-right: 12px;
+  background: linear-gradient(90deg, transparent, var(--accent));
+  opacity: 0.6;
+}
+
 /* ---- 模块卡片网格：自适应列数，天然响应式 ---- */
 .cards {
   position: relative;

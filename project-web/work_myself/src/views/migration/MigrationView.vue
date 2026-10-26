@@ -36,6 +36,7 @@ const {
         <div class="title-wrap">
           <h1 class="screen-title">
             {{ selectedProvince ? selectedProvince.name : '全国' }}人口流动实时监测
+            <em class="sign">by 禹来</em>
           </h1>
           <p class="screen-subtitle">REAL-TIME POPULATION MIGRATION MONITORING</p>
         </div>

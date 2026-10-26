@@ -51,6 +51,7 @@ const {
         <br class="hero-br" />
         五个模块，讲清从像素到数据的全链路
       </p>
+      <p class="hero-sign reveal" :ref="observe">— 禹来 · 前端全栈工程师</p>
     </main>
 
     <section class="stats reveal" :ref="observe">
@@ -100,6 +101,6 @@ const {
       </article>
     </section>
 
-    <footer class="footer">Designed &amp; Built with Vue 3 + FastAPI</footer>
+    <footer class="footer">© 2026 禹来 · 前端全栈作品集 · Designed &amp; Built with Vue 3 + FastAPI</footer>
   </div>
 </template>

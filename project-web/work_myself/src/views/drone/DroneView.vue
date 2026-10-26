@@ -55,7 +55,7 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
     <header class="top-bar">
       <router-link class="back-link" to="/">← 门户</router-link>
       <div class="title-wrap">
-        <h1 class="page-title">物流无人机机队监控</h1>
+        <h1 class="page-title">物流无人机机队监控<em class="sign">by 禹来</em></h1>
         <p class="page-sub">UAV LOGISTICS FLEET · NANJING</p>
       </div>
       <div class="top-right">

@@ -68,6 +68,22 @@
   color: transparent;
 }
 
+.screen-title .sign {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 3px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  vertical-align: 6px;
+  -webkit-text-fill-color: initial;
+}
+
 .screen-subtitle {
   font-family: var(--font-mono);
   font-size: 12px;

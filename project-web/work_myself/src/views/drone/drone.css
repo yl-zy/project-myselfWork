@@ -70,6 +70,22 @@
   color: transparent;
 }
 
+.page-title .sign {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+  background: var(--panel-muted);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  vertical-align: 3px;
+  -webkit-text-fill-color: initial;
+}
+
 .page-sub {
   font-family: var(--font-mono);
   font-size: 10px;
