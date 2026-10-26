@@ -2,7 +2,6 @@
 import { computed, useTemplateRef } from 'vue'
 import { STATUS_META, STATUS_ORDER, useDroneScreen } from './drone'
 import { useStatsPanel } from './statsPanel'
-import './drone.css'
 
 const cesiumEl = useTemplateRef<HTMLElement>('cesiumEl')
 const statsPieEl = useTemplateRef<HTMLElement>('statsPieEl')
@@ -14,6 +13,7 @@ const {
   connected,
   snapshot,
   stats,
+  stations,
   baseName,
   statusFilter,
   keyword,
@@ -27,6 +27,8 @@ const {
   hoverInfo,
   hoveredDrone,
   updatedText,
+  fleetCollapsed,
+  statsCollapsed,
   fmtBattery,
   fmtDistance,
   fmtDuration,
@@ -38,9 +40,17 @@ const {
   toggleFollow,
   setStatusFilter,
   toggleLive,
+  toggleFleet,
+  toggleStats,
 } = useDroneScreen(cesiumEl)
 
 const selectedBattery = computed(() => selectedBrief.value?.battery ?? 0)
+
+// 选中机的配送站信息（由 station_code 从顶层 stations 字典反查）
+const selectedStation = computed(() => {
+  const code = selectedBrief.value?.station_code
+  return code ? stations.value[code] : undefined
+})
 
 // 数据统计面板：六态分布 + 电量分布，随 2s 快照实时更新（statsPanel.ts 内部管理 echarts 生命周期）
 useStatsPanel(statsPieEl, statsBarEl, snapshot)
@@ -110,7 +120,17 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
     </section>
 
     <!-- 左侧：状态筛选 + 机队清单 -->
-    <aside class="side-panel left-panel">
+    <aside class="side-panel left-panel" :class="{ collapsed: fleetCollapsed }">
+      <button
+        class="rail-btn"
+        type="button"
+        :aria-expanded="!fleetCollapsed"
+        :title="fleetCollapsed ? '展开机队面板' : '收起机队面板'"
+        @click="toggleFleet"
+      >
+        <span class="rail-arrow">{{ fleetCollapsed ? '»' : '«' }}</span>
+        <span class="rail-label">{{ fleetCollapsed ? '机队清单' : '收起' }}</span>
+      </button>
       <section class="panel">
         <h3 class="panel-title"><span class="panel-mark" />机队状态</h3>
         <div class="filter-row">
@@ -253,7 +273,7 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
         <div class="task-row">
           <span class="task-label">配送站</span>
           <span>
-            {{ selectedBrief.station?.name ?? '--' }}<em class="mono">{{ selectedBrief.station?.code }}</em>
+            {{ selectedStation?.name ?? '--' }}<em class="mono">{{ selectedBrief?.station_code }}</em>
           </span>
         </div>
         <div class="task-row">
@@ -280,9 +300,21 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
     </aside>
 
     <!-- 数据统计面板：六态分布 + 电量分布，随 2s 快照实时更新 -->
-    <aside class="panel stats-panel" :class="{ 'stats-hidden': selectedId }">
-      <h3 class="panel-title"><span class="panel-mark violet" />数据统计</h3>
+    <aside class="panel stats-panel" :class="[{ 'stats-hidden': selectedId }, { collapsed: statsCollapsed }]">
+      <div class="panel-head">
+        <h3 class="panel-title"><span class="panel-mark violet" />数据统计</h3>
+        <button
+          class="collapse-btn"
+          type="button"
+          :aria-expanded="!statsCollapsed"
+          :title="statsCollapsed ? '展开数据统计' : '收起数据统计'"
+          @click="toggleStats"
+        >
+          {{ statsCollapsed ? '▴' : '▾' }}
+        </button>
+      </div>
 
+      <div class="stats-body">
       <div class="stats-kpi">
         <div class="kpi">
           <b>{{ stats?.total ?? 0 }}</b>
@@ -315,6 +347,7 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
         <p class="chart-title">电量区间</p>
         <div ref="statsBarEl" class="chart-box" />
       </div>
+      </div>
     </aside>
 
     <!-- 鼠标悬浮提示：跟随光标 -->
@@ -333,6 +366,18 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
       <p class="tip-line mono">{{ hoveredDrone.order_id ?? '未派单' }}</p>
     </div>
 
+    <!-- 移动端：折叠状态下的机队清单悬浮开关（抽屉） -->
+    <button
+      class="panel-fab fleet-fab"
+      type="button"
+      :class="{ active: !fleetCollapsed }"
+      :aria-expanded="!fleetCollapsed"
+      @click="toggleFleet"
+    >
+      <span class="fab-icon">{{ fleetCollapsed ? '☰' : '×' }}</span>
+      <span class="fab-label">{{ fleetCollapsed ? '机队清单' : '收起' }}</span>
+    </button>
+
     <!-- 底部提示 -->
     <footer class="footer-tip">
       <span class="live-dot" :class="{ paused: !live }" />
@@ -340,3 +385,5 @@ useStatsPanel(statsPieEl, statsBarEl, snapshot)
     </footer>
   </div>
 </template>
+
+<style scoped src="./drone.css"></style>

@@ -23,7 +23,7 @@ import {
   type Entity,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import type { DroneBrief, DroneRoute, DroneStation, DroneStatus } from '@/api/drone'
+import type { DroneBrief, DroneRoute, DroneStatus, StationInfo } from '@/api/drone'
 
 /** 状态配色：三维场景、图例、详情面板共用一套（与深色科技风主题一致） */
 export const STATUS_COLOR: Record<DroneStatus, string> = {
@@ -282,10 +282,10 @@ export class FleetScene {
     })
   }
 
-  /** 配送站标记：从快照里出现的站点增量补齐，避免重复建实体 */
-  setStations(stations: DroneStation[]): void {
-    for (const s of stations) {
-      if (this.stations.has(s.code)) continue
+  /** 配送站标记：从顶层 stations 字典增量补齐，避免重复建实体 */
+  setStations(stations: Record<string, StationInfo>): void {
+    for (const [code, s] of Object.entries(stations)) {
+      if (this.stations.has(code)) continue
       const entity = this.viewer.entities.add({
         position: Cartesian3.fromDegrees(s.lng, s.lat, 0),
         point: {
@@ -296,7 +296,7 @@ export class FleetScene {
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       })
-      this.stations.set(s.code, entity)
+      this.stations.set(code, entity)
     }
   }
 

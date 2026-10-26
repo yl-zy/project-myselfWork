@@ -10,7 +10,14 @@ export interface DroneStation {
   lat: number
 }
 
-/** 快照中的单机摘要：前端 2s 轮询一次 */
+/** 快照顶层 stations 字典的值：配送站名称与坐标（坐标已由后端截断为高精度，code 作为字典键） */
+export interface StationInfo {
+  name: string
+  lng: number
+  lat: number
+}
+
+/** 快照中的单机摘要：前端 2s 轮询一次（配送站只带 code，名称/坐标由顶层 stations 反查） */
 export interface DroneBrief {
   id: string
   lng: number
@@ -21,7 +28,7 @@ export interface DroneBrief {
   battery: number
   status: DroneStatus
   order_id: string | null
-  station: DroneStation | null
+  station_code: string | null
   progress: number
   flight_time: number
   completed_orders: number
@@ -38,6 +45,7 @@ export interface DroneStats {
 
 export interface DroneSnapshot {
   drones: DroneBrief[]
+  stations: Record<string, StationInfo>
   stats: DroneStats
   ts: number
 }

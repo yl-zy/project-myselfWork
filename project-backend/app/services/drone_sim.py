@@ -260,14 +260,23 @@ class DroneSimEngine:
     # ---- 输出 ----
 
     def snapshot(self) -> dict:
-        """全队快照：200 台摘要 + 机队统计（前端 2s 轮询一次）"""
+        """全队快照：200 台摘要 + 配送站字典 + 机队统计（前端 2s 轮询一次）
+
+        载荷优化：配送站坐标在全队级别只发一份（drone 里只带 station_code 反查），
+        并把坐标截断到 6 位小数（约 0.1m 精度），显著压缩海外链路传输体积。
+        """
 
         items = [self._drone_brief(d) for d in self.drones]
         by_status: dict[str, int] = {}
         for d in self.drones:
             by_status[d.status] = by_status.get(d.status, 0) + 1
+        stations = {
+            s.code: {"name": s.name, "lng": round(s.lng, 6), "lat": round(s.lat, 6)}
+            for s in self.stations
+        }
         return {
             "drones": items,
+            "stations": stations,
             "stats": {
                 "total": len(self.drones),
                 "by_status": by_status,
@@ -306,8 +315,8 @@ class DroneSimEngine:
             "station": {
                 "code": d.station.code,
                 "name": d.station.name,
-                "lng": d.station.lng,
-                "lat": d.station.lat,
+                "lng": round(d.station.lng, 6),
+                "lat": round(d.station.lat, 6),
             },
             "trip_total": round(d.trip_total),
         }
@@ -324,16 +333,7 @@ class DroneSimEngine:
             "battery": round(d.battery, 1),
             "status": d.status,
             "order_id": d.order_id,
-            "station": (
-                {
-                    "code": d.station.code,
-                    "name": d.station.name,
-                    "lng": d.station.lng,
-                    "lat": d.station.lat,
-                }
-                if d.station
-                else None
-            ),
+            "station_code": d.station.code if d.station else None,
             "progress": round(d.progress, 3),
             "flight_time": round(d.flight_time),
             "completed_orders": d.completed_orders,

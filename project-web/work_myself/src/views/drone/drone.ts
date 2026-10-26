@@ -6,7 +6,7 @@ import {
   type DroneDetail,
   type DroneSnapshot,
   type DroneStats,
-  type DroneStation,
+  type StationInfo,
   type DroneStatus,
 } from '@/api/drone'
 import { toast } from '@/utils/toast'
@@ -36,12 +36,19 @@ export const STATUS_ORDER: DroneStatus[] = [
 
 export type StatusFilter = DroneStatus | 'all'
 
+/** 悬浮面板折叠断点：≤820px 视为手机/窄屏，默认收起面板避免遮挡三维地图 */
+const MOBILE_MAX = 820
+function isMobileLayout(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(`(max-width: ${MOBILE_MAX}px)`).matches
+}
+
 /** 物流机队监控逻辑：快照轮询 + 状态筛选 + 点选详情 + 视角跟随 */
 export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>>) {
   let scene: FleetScene | null = null
   let timer = 0
   let disposed = false
   let firstFail = true
+  let pulling = false
 
   const loading = ref(true)
   const live = ref(true)
@@ -55,8 +62,13 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
   const hoverInfo = ref<{ id: string; x: number; y: number } | null>(null)
   const lastUpdated = ref<number | null>(null)
 
+  // 悬浮面板折叠状态：桌面端默认展开、移动端默认收起（避免遮挡地图，可手动展开）
+  const fleetCollapsed = ref(isMobileLayout())
+  const statsCollapsed = ref(isMobileLayout())
+
   const stats = computed<DroneStats | null>(() => snapshot.value?.stats ?? null)
   const drones = computed<DroneBrief[]>(() => snapshot.value?.drones ?? [])
+  const stations = computed<Record<string, StationInfo>>(() => snapshot.value?.stations ?? {})
   const baseName = computed(() => stats.value?.base.name ?? '新街口物流基站')
 
   const statusCounts = computed<Record<DroneStatus, number>>(() => {
@@ -90,7 +102,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
       return (
         d.id.toLowerCase().includes(kw) ||
         (d.order_id ?? '').toLowerCase().includes(kw) ||
-        (d.station?.name ?? '').toLowerCase().includes(kw)
+        (d.station_code ? (stations.value[d.station_code]?.name ?? '') : '').toLowerCase().includes(kw)
       )
     })
   })
@@ -143,23 +155,15 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
     loading.value = false
     scene?.setBase(res.stats.base)
     scene?.setFleet(res.drones)
-
-    // 站点标记：从快照中出现过的配送站增量补齐
-    const unique: DroneStation[] = []
-    const codes = new Set<string>()
-    for (const d of res.drones) {
-      if (!d.station || codes.has(d.station.code)) continue
-      codes.add(d.station.code)
-      unique.push(d.station)
-    }
-    scene?.setStations(unique)
+    scene?.setStations(res.stations)
 
     // 第一波数据到达：相机从"基站上空"平滑过渡到"机队包围球总览"
     if (isFirst) scene?.overview()
   }
 
   async function pull(): Promise<void> {
-    if (disposed) return
+    if (disposed || pulling) return
+    pulling = true
     try {
       const res = await getDroneSnapshot()
       if (disposed) return
@@ -173,7 +177,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
         toast.error('机队数据加载失败，请确认后端服务已启动')
       }
     } finally {
-      if (live.value && !disposed) timer = window.setTimeout(() => void pull(), POLL_MS)
+      pulling = false
     }
   }
 
@@ -227,12 +231,17 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
   /** 暂停/恢复轮询：暂停后场景冻结在当前快照，便于讲解演示 */
   function toggleLive(): void {
     live.value = !live.value
-    if (live.value) {
-      void pull()
-    } else {
-      window.clearTimeout(timer)
-      timer = 0
-    }
+    if (live.value) void pull()
+  }
+
+  /** 折叠/展开左侧机队面板 */
+  function toggleFleet(): void {
+    fleetCollapsed.value = !fleetCollapsed.value
+  }
+
+  /** 折叠/展开右下角数据统计面板 */
+  function toggleStats(): void {
+    statsCollapsed.value = !statsCollapsed.value
   }
 
   onMounted(() => {
@@ -244,6 +253,10 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
         },
       })
       void pull()
+      // 固定节奏轮询：2s 一拍，节奏不受网络往返抖动影响；快照到达后由速度外推保持连续
+      timer = window.setInterval(() => {
+        if (live.value && !disposed) void pull()
+      }, POLL_MS)
     } catch {
       toast.error('三维场景初始化失败，请刷新重试')
       loading.value = false
@@ -252,7 +265,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
 
   onBeforeUnmount(() => {
     disposed = true
-    window.clearTimeout(timer)
+    window.clearInterval(timer)
     scene?.destroy()
     scene = null
   })
@@ -264,6 +277,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
     snapshot,
     stats,
     drones,
+    stations,
     baseName,
     statusFilter,
     keyword,
@@ -277,6 +291,8 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
     hoverInfo,
     hoveredDrone,
     updatedText,
+    fleetCollapsed,
+    statsCollapsed,
     STATUS_META,
     STATUS_ORDER,
     fmtBattery,
@@ -290,5 +306,7 @@ export function useDroneScreen(cesiumEl: Readonly<ShallowRef<HTMLElement | null>
     toggleFollow,
     setStatusFilter,
     toggleLive,
+    toggleFleet,
+    toggleStats,
   }
 }

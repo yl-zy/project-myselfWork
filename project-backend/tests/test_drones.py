@@ -60,9 +60,10 @@ def test_snapshot_api_contract():
     assert len(drones) == DRONE_COUNT
     required = {
         "id", "lng", "lat", "alt", "heading", "speed", "battery",
-        "status", "order_id", "station", "progress", "flight_time", "completed_orders",
+        "status", "order_id", "station_code", "progress", "flight_time", "completed_orders",
     }
     assert all(required <= d.keys() for d in drones)
+    assert data["stations"]  # 配送站字典：code → 名称/坐标（前端按 code 反查）
     stats = data["stats"]
     assert stats["total"] == DRONE_COUNT
     assert sum(stats["by_status"].values()) == DRONE_COUNT
