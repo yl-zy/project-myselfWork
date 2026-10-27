@@ -3,6 +3,9 @@ import { setCurrentPage } from '@/utils/perf'
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(_to, _from, savedPosition) {
+    return savedPosition ?? { top: 0 }
+  },
   routes: [
     {
       path: '/',
